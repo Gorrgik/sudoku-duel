@@ -1466,6 +1466,7 @@
   <div class="num-pad" id="duelNumPad"></div>
   <div class="controls">
     <button class="btn icon-btn auth-btn" id="duelAuthBtn" title="Войти">👤</button>
+    <button class="btn ghost" id="duelPencilBtn">✏️ Карандаш</button>
     <button class="btn ghost" id="duelQuitBtn" style="pointer-events:auto;z-index:10;position:relative;">✕ Выйти</button>
   </div>
 </div>
@@ -3073,15 +3074,24 @@ async function showAdminPanel() {
   statsDiv.innerHTML = html;
 
   // ── Раздел: Таблица рекордов ──
-  document.getElementById('adminTabRecords').addEventListener('click', () => showAdminRecords());
-  // ── Раздел: Рейтинг дуэлей ──
-  document.getElementById('adminTabRatings').addEventListener('click', () => showAdminRatings());
-  // ── Раздел: Дуэли (комнаты) ──
-  document.getElementById('adminTabRooms').addEventListener('click', () => showAdminRooms());
-  // ── Раздел: Мониторинг (онлайн, пользователи, дуэли) ──
-  document.getElementById('adminTabMonitor').addEventListener('click', () => showAdminMonitor());
-  // ── Раздел: Обратная связь ──
-  document.getElementById('adminTabFeedback').addEventListener('click', () => showAdminFeedback());
+  // Чтобы не дублировать обработчики при повторных вызовах showAdminPanel,
+  // используем dataset-маркер + replaceWith
+  const wireAdminTab = (id, fn) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const newEl = el.cloneNode(true);
+    el.parentNode.replaceChild(newEl, el);
+    newEl.addEventListener('click', () => { stopAdminTimer(); fn(); });
+  };
+  wireAdminTab('adminTabRecords', showAdminRecords);
+  wireAdminTab('adminTabRatings', showAdminRatings);
+  wireAdminTab('adminTabRooms', showAdminRooms);
+  wireAdminTab('adminTabMonitor', showAdminMonitor);
+  wireAdminTab('adminTabFeedback', showAdminFeedback);
+
+  function stopAdminTimer() {
+    if (_adminRefreshTimer) { clearInterval(_adminRefreshTimer); _adminRefreshTimer = null; }
+  }
 }
 
 // Live-refresh таймер для админки (для вкладки Дуэли)
@@ -3172,9 +3182,9 @@ async function showAdminRatings() {
   actionsDiv.innerHTML = '';
 
   try {
-    // Загружаем рейтинги + баны параллельно
+    // Загружаем рейтинги + баны параллельно. Только залогиненные (UUID содержит дефисы)
     const [ratingsR, bannedR] = await Promise.all([
-      fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }),
+      fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins&uid=like.*-*&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }),
       fetch(`${_SB_REST}/banned_users?select=uid`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }).catch(() => ({ json: async () => [] }))
     ]);
     const data = await ratingsR.json();
@@ -3244,6 +3254,21 @@ async function showAdminRatings() {
       if (dr.ok) showAdminPanel();
     });
     actionsDiv.appendChild(clearAll);
+
+    // Удалить только анонимные записи (uid без дефисов)
+    const cleanAnon = document.createElement('button');
+    cleanAnon.className = 'btn ghost';
+    cleanAnon.style.width = '100%';
+    cleanAnon.style.textAlign = 'left';
+    cleanAnon.style.color = 'var(--warn)';
+    cleanAnon.textContent = '🧹 Удалить анонимных';
+    cleanAnon.addEventListener('click', async () => {
+      if (!confirm('Удалить все записи анонимных пользователей (старые 16-символьные uid)?')) return;
+      const dr = await fetch(`${_SB_REST}/duel_ratings?uid=not.like.*-*`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
+      alert(dr.ok ? 'OK' : 'Ошибка: ' + dr.status);
+      if (dr.ok) showAdminPanel();
+    });
+    actionsDiv.appendChild(cleanAnon);
 
   } catch(e) {
     section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка загрузки: ' + e.message + '</div>';
@@ -3541,7 +3566,7 @@ async function showAdminMonitor() {
 
       // 2. Пользователи (из duel_ratings) + кто онлайн (last_seen за последние 30 сек)
       const cutoff = Date.now() - 30000;
-      const usersR = await fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins,last_seen&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+      const usersR = await fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins,last_seen&uid=like.*-*&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
       const users = await usersR.json();
 
       // 3. Matchmaking (кто ищет соперника)
@@ -4052,33 +4077,49 @@ $('quitBtn').addEventListener('click', () => {
   }
 });
 $('hintBtn').addEventListener('click', showHint);
-$('pencilBtn').addEventListener('click', () => {
-  // Карандаш в обычном режиме
+$('pencilBtn').addEventListener('click', () => { togglePencilMode(); });
+$('duelPencilBtn')?.addEventListener('click', () => { togglePencilMode(); });
+
+function togglePencilMode() {
   if (state && state.started) {
     state.pencilMode = !state.pencilMode;
     updatePencilBtn();
     playClick();
     return;
   }
-  // Карандаш в дуэли
   if (duelCode && duelBoard) {
     duelPencilMode = !duelPencilMode;
     updatePencilBtn();
+    updateDuelPencilBtn();
     playClick();
   }
-});
+}
 
-function updatePencilBtn() {
-  const btn = $('pencilBtn');
+function updateDuelPencilBtn() {
+  const btn = $('duelPencilBtn');
   if (!btn) return;
-  const active = (state && state.pencilMode) || duelPencilMode;
-  if (active) {
+  if (duelPencilMode) {
     btn.classList.add('active');
     btn.textContent = '✏️ Карандаш вкл.';
   } else {
     btn.classList.remove('active');
     btn.textContent = '✏️ Карандаш';
   }
+}
+
+function updatePencilBtn() {
+  const active = (state && state.pencilMode) || duelPencilMode;
+  ['pencilBtn', 'duelPencilBtn'].forEach(id => {
+    const btn = $(id);
+    if (!btn) return;
+    if (active) {
+      btn.classList.add('active');
+      btn.textContent = '✏️ Карандаш вкл.';
+    } else {
+      btn.classList.remove('active');
+      btn.textContent = '✏️ Карандаш';
+    }
+  });
 }
 
 // Управление с клавиатуры
@@ -4536,6 +4577,7 @@ function _applyDuelRoom(room) {
     startDuelTimer();
     updateDuelHUD(room);
     updatePencilBtn(); // обновить кнопку карандаша (сбросить если была активна)
+    updateDuelPencilBtn();
   } else {
     // Sync: обновляем lives и opponent's ходы в DOM без пересоздания доски
     duelMyCorrect = Number(isP1 ? (room.player1_correct || 0) : (room.player2_correct || 0));
