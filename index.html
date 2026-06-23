@@ -145,7 +145,7 @@
   fetch(`${SB}/duel_ratings?uid=eq.${myUid}&limit=1`, { method: 'GET', headers: HDR, mode: 'cors' })
     .then(r => { sbOk = true; console.log('Supabase REST OK, uid:', myUid); })
     .catch(() => { sbOk = false; console.warn('Supabase REST недоступен'); })
-    .finally(() => { fbReady = true; window.dispatchEvent(new Event('firebase_ready')); });
+    .finally(() => { fbReady = true; window.dispatchEvent(new Event('firebase_ready')); startHeartbeat(); });
 
   console.log('[SUDOKU] мой uid:', myUid);
 
@@ -229,17 +229,38 @@
           rating: newRating,
           games: (snap.games || 0) + 1,
           wins: (snap.wins || 0) + (delta > 0 ? 1 : 0),
-          name
+          name,
+          last_seen: Date.now()
         });
         console.log('[SUDOKU] upsertRating: updated uid=', uid, 'newRating=', newRating);
         if (uid === myUid) myRating = newRating;
       } else {
         const newRating = Math.max(0, 1000 + delta);
-        await sbUpsert('duel_ratings', { uid, name, rating: newRating, games: 1, wins: delta > 0 ? 1 : 0 });
+        await sbUpsert('duel_ratings', { uid, name, rating: newRating, games: 1, wins: delta > 0 ? 1 : 0, last_seen: Date.now() });
         console.log('[SUDOKU] upsertRating: created uid=', uid, 'rating=', newRating);
         if (uid === myUid) myRating = newRating;
       }
     } catch(e) { console.error('[SUDOKU] upsertRating error:', e); }
+  }
+
+  // ── Heartbeat: обновляет last_seen каждые 15 сек для отслеживания онлайна ──
+  let _heartbeatInterval = null;
+  async function heartbeat() {
+    if (!sbOk || !myUid) return;
+    try {
+      const name = myName || currentUser?.user_metadata?.name || currentUser?.email?.split('@')[0] || 'Игрок';
+      await sbUpsert('duel_ratings', {
+        uid: myUid,
+        name,
+        rating: myRating,
+        last_seen: Date.now()
+      });
+    } catch(e) { /* молча */ }
+  }
+  function startHeartbeat() {
+    if (_heartbeatInterval) return;
+    heartbeat();
+    _heartbeatInterval = setInterval(heartbeat, 15000);
   }
 
   // ── Public API ─────────────────────────────────────────────────────
@@ -3269,8 +3290,9 @@ async function showAdminMonitor() {
       const roomsR = await fetch(`${_SB_REST}/duel_rooms?select=code,status,player1_name,player1_uid,player1_rating,player1_correct,player1_errors,player2_name,player2_uid,player2_rating,player2_correct,player2_errors,created_at&order=created_at.desc&limit=100`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
       const rooms = await roomsR.json();
 
-      // 2. Пользователи (из duel_ratings)
-      const usersR = await fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins,wins&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+      // 2. Пользователи (из duel_ratings) + кто онлайн (last_seen за последние 30 сек)
+      const cutoff = Date.now() - 30000;
+      const usersR = await fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins,last_seen&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
       const users = await usersR.json();
 
       // 3. Matchmaking (кто ищет соперника)
@@ -3280,7 +3302,9 @@ async function showAdminMonitor() {
       const playing = rooms.filter(r => r.status === 'playing');
       const waiting = rooms.filter(r => r.status === 'waiting');
       const finished = rooms.filter(r => ['p1_won','p2_won','p1_quit','p2_quit'].includes(r.status));
-      const onlineCount = playing.length * 2 + queue.length;
+      // Онлайн — все, кто слал heartbeat за последние 30 сек
+      const onlineUsers = (users || []).filter(u => u.last_seen && u.last_seen > cutoff);
+      const onlineCount = onlineUsers.length;
 
       const statusColor = s => ({playing:'var(--good)', waiting:'var(--warn)', p1_won:'var(--accent)', p2_won:'var(--accent)', p1_quit:'var(--text-dim)', p2_quit:'var(--text-dim)'}[s] || 'var(--text-dim)');
       const statusLabel = s => ({playing:'🎮 играют', waiting:'⏳ ожидает', p1_won:'✅ победа p1', p2_won:'✅ победа p2', p1_quit:'🚪 p1 вышел', p2_quit:'🚪 p2 вышел'}[s] || s);
@@ -3381,6 +3405,22 @@ async function showAdminMonitor() {
             <span style="color:var(--text-dim);font-size:0.75rem;float:right">${escapeHtml((q.uid||'').slice(0,8))}</span>
           </div>`;
         });
+      }
+
+      // Список онлайн-пользователей
+      html += `<div style="font-weight:bold;margin:16px 0 6px;">🟢 Онлайн сейчас (${onlineUsers.length})</div>`;
+      if (onlineUsers.length === 0) {
+        html += '<div style="color:var(--text-dim);font-size:0.85rem">Никого нет онлайн</div>';
+      } else {
+        html += '<div style="background:var(--bg-soft);padding:8px 10px;border-radius:6px;font-size:0.85rem;max-height:200px;overflow-y:auto;">';
+        onlineUsers.forEach(u => {
+          const sec = Math.floor((Date.now() - (u.last_seen || 0)) / 1000);
+          html += `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+            <span>${escapeHtml(u.name || u.uid?.slice(0,8) || '—')}</span>
+            <span style="color:var(--text-dim);font-size:0.75rem">${sec < 60 ? sec + 'с' : Math.floor(sec/60) + 'м'} · рейтинг ${u.rating || 1000}</span>
+          </div>`;
+        });
+        html += '</div>';
       }
 
       html += `<div style="color:var(--text-dim);font-size:0.7rem;margin-top:8px;text-align:right">Обновлено: ${new Date().toLocaleTimeString('ru-RU')}</div>`;
