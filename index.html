@@ -287,15 +287,18 @@
   // ── Проверка бана ─────────────────────────────────────────────────
   let _banCache = null;
   async function isBanned() {
-    if (!sbOk || !myUid) return false;
-    if (_banCache && Date.now() - _banCache.checked < 30000) return _banCache.banned;
+    if (!sbOk) return false;
+    if (!myUid) return false;
+    if (_banCache && Date.now() - _banCache.checked < 10000) return _banCache.banned;
     try {
       const r = await fetch(`${SB}/banned_users?uid=eq.${myUid}&limit=1`, { method: 'GET', headers: HDR, mode: 'cors', cache: 'no-store' });
+      if (!r.ok) { console.warn('[SUDOKU] banned_users query failed:', r.status); return false; }
       const data = await r.json();
       const banned = Array.isArray(data) && data.length > 0;
+      console.log('[SUDOKU] isBanned:', banned, 'uid:', myUid, 'rows:', data?.length);
       _banCache = { banned, checked: Date.now() };
       return banned;
-    } catch(e) { return false; }
+    } catch(e) { console.warn('[SUDOKU] isBanned error:', e); return false; }
   }
   function refreshBanCache() { _banCache = null; }
 
@@ -3037,7 +3040,6 @@ async function showAdminPanel() {
     { name: 'duel_ratings', label: 'Рейтинг дуэлей (duel_ratings)' },
   ];
 
-  const statsDiv = document.getElementById('adminStats');
   document.getElementById('adminCloseBtn').addEventListener('click', () => {
     document.getElementById('modal')?.classList.add('hidden');
   });
