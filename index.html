@@ -57,6 +57,8 @@
         }
         isAuthLoading = false;
         window.dispatchEvent(new CustomEvent('auth_state_changed'));
+        // На случай если слушатель ещё не зарегистрирован — вызываем напрямую
+        try { updateAuthButton?.(); } catch(_) {}
       });
 
       // Проверяем текущую сессию
@@ -76,6 +78,7 @@
         }
         isAuthLoading = false;
         window.dispatchEvent(new CustomEvent('auth_state_changed'));
+        try { updateAuthButton?.(); } catch(_) {}
       }).catch(() => {
         isAuthLoading = false;
       });
@@ -3623,6 +3626,10 @@ window.addEventListener('auth_state_changed', () => {
 });
 // Начальное обновление кнопки
 setTimeout(updateAuthButton, 100);
+// Повторные попытки — на случай если событие успело сработать до регистрации слушателя
+setTimeout(updateAuthButton, 500);
+setTimeout(updateAuthButton, 1500);
+setTimeout(updateAuthButton, 3000);
 
 $('resumeBtn').addEventListener('click', resumeGame);
 $('showRecordsBtn').addEventListener('click', showRecordsModal);
