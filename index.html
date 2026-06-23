@@ -350,6 +350,8 @@
     },
 
     async createDuelRoom(puzzle, solution, playerName) {
+      // Проверка бана
+      if (await isBanned()) { alert('⛔ Вы заблокированы и не можете создавать дуэли.'); return null; }
       if (!sbOk) return null;
       const code = makeRoomCode();
       await sbPost('duel_rooms', {
@@ -383,6 +385,8 @@
     },
 
     async joinDuelRoom(code, playerName) {
+      // Проверка бана
+      if (await isBanned()) { alert('⛔ Вы заблокированы и не можете присоединяться к дуэлям.'); return { error: 'Заблокирован' }; }
       console.log('[SUDOKU] B: joinDuelRoom вызван с кодом', code);
       if (!sbOk) return { error: 'Supabase недоступен' };
       const [room] = await sbGet('duel_rooms', `code=eq.${code}&limit=1`);
@@ -521,6 +525,8 @@
       if (window._mmInProgress) { console.log('[SUDOKU] joinQueue: уже в процессе'); return; }
       window._mmInProgress = true;
       if (!sbOk) { window._mmInProgress = false; alert('Supabase недоступен'); return; }
+      // Проверка бана
+      if (await isBanned()) { window._mmInProgress = false; alert('⛔ Вы заблокированы и не можете участвовать в дуэлях.'); return; }
       myRating = rating || myRating;
 
       let _matchedOnce = false;
@@ -3002,16 +3008,13 @@ async function showAdminPanel() {
   modal.innerHTML = `
     <div class="duel-modal-step">
       <h2>⚙️ Админ-панель</h2>
-      <div class="modal-sub">Управление таблицами Sudoku</div>
-      <div id="adminStats" style="text-align:left;margin:12px 0;">
-        <div style="color:var(--text-dim)">Загрузка...</div>
-      </div>
+      <div class="modal-sub">Управление Sudoku Duel</div>
       <div style="display:flex;gap:6px;margin:16px 0 8px;flex-wrap:wrap;">
         <button class="btn primary" id="adminTabMonitor" style="flex:1;min-width:80px">📊 Мониторинг</button>
         <button class="btn primary" id="adminTabRecords" style="flex:1;min-width:80px">🏆 Рекорды</button>
         <button class="btn primary" id="adminTabRatings" style="flex:1;min-width:80px">⚔️ Рейтинг</button>
         <button class="btn primary" id="adminTabRooms" style="flex:1;min-width:80px">🎮 Дуэли</button>
-        <button class="btn primary" id="adminTabFeedback" style="flex:1;min-width:80px">📨 Обратная связь</button>
+        <button class="btn primary" id="adminTabFeedback" style="flex:1;min-width:80px">📨 Связь</button>
       </div>
       <div id="adminSection" style="text-align:left;margin:8px 0;">
         <div style="color:var(--text-dim)">Выберите раздел</div>
@@ -3043,35 +3046,6 @@ async function showAdminPanel() {
     await window.FB.signOut();
     document.getElementById('modal')?.classList.add('hidden');
   });
-
-  // ── Считаем строки во всех таблицах + локальные рекорды ──
-  // PK колонка у каждой таблицы своя (для select — что-нибудь валидное)
-  const pkCol = { duel_rooms: 'code', matchmaking: 'uid', duel_ratings: 'uid' };
-  let html = '';
-  for (const t of tables) {
-    try {
-      const r = await fetch(`${_SB_REST}/${t.name}?select=${pkCol[t.name]}&limit=1000`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-      const data = await r.json();
-      const count = Array.isArray(data) ? data.length : '?';
-      html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
-        <span>${t.label}</span>
-        <span style="color:var(--accent)">${count} строк</span>
-      </div>`;
-    } catch(e) {
-      html += `<div style="display:flex;justify-content:space-between;padding:6px 0;">
-        <span>${t.label}</span>
-        <span style="color:red">Ошибка</span>
-      </div>`;
-    }
-  }
-  // Локальные рекорды (одиночная игра)
-  let localRecs = [];
-  try { localRecs = JSON.parse(localStorage.getItem('sudoku_records_v1') || '[]'); } catch {}
-  html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
-    <span>🏆 Таблица рекордов (localStorage)</span>
-    <span style="color:var(--accent)">${localRecs.length} строк</span>
-  </div>`;
-  statsDiv.innerHTML = html;
 
   // ── Раздел: Таблица рекордов ──
   // Чтобы не дублировать обработчики при повторных вызовах showAdminPanel,
