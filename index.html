@@ -249,8 +249,8 @@
     isSignedIn: () => !!currentUser,
     isAuthLoading: () => isAuthLoading,
     getMyUid: () => myUid,
-    getMyName: () => currentUser?.user_metadata?.name || currentUser?.email?.split('@')[0] || myName,
-    setMyName: n => { myName = String(n).slice(0, 20); localStorage.setItem('sudoku_duel_name', myName); },
+    getMyName: () => (myName && myName.trim()) || currentUser?.user_metadata?.name || currentUser?.email?.split('@')[0] || 'Игрок',
+    setMyName: n => { myName = String(n).trim().slice(0, 20); localStorage.setItem('sudoku_duel_name', myName); },
     getCurrentUser: () => currentUser,
     signInWithGoogle,
     signInWithEmail,
@@ -2677,15 +2677,23 @@ function showAuthModal() {
   const user = window.FB?.getCurrentUser();
   if (user) {
     // Показываем профиль и кнопку выхода
-    const name = user.user_metadata?.name || user.email?.split('@')[0] || 'Пользователь';
+    const name = window.FB.getMyName();
     const email = user.email || '';
     const modal = $('modalContent');
     modal.innerHTML = `
       <div style="text-align:center;">
         <div style="font-size:3rem;margin-bottom:8px;">${name.charAt(0).toUpperCase()}</div>
-        <h2>${escapeHtml(name)}</h2>
+        <h2 id="authProfileName">${escapeHtml(name)}</h2>
         <div style="color:var(--text-dim);font-size:0.88rem;margin-bottom:4px;">${escapeHtml(email)}</div>
-        <div style="font-size:0.82rem;color:var(--accent);margin-bottom:20px;" id="authRatingDisplay">⭐ Загрузка рейтинга...</div>
+        <div style="font-size:0.82rem;color:var(--accent);margin-bottom:16px;" id="authRatingDisplay">⭐ Загрузка рейтинга...</div>
+        <button class="btn ghost" id="authChangeNameBtn" style="width:100%;margin-bottom:8px;">✏️ Изменить ник</button>
+        <div id="authChangeNameBox" style="display:none;margin-bottom:16px;">
+          <input type="text" id="authNewNameInput" maxlength="20" placeholder="Новый ник" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--accent);background:var(--bg-soft);color:var(--text);margin-bottom:8px;font-size:14px;">
+          <div style="display:flex;gap:8px;">
+            <button class="btn primary" id="authSaveNameBtn" style="flex:1">Сохранить</button>
+            <button class="btn ghost" id="authCancelNameBtn" style="flex:1">Отмена</button>
+          </div>
+        </div>
       </div>
       <div class="modal-actions" style="justify-content:center;">
         <button class="btn danger" id="authSignOutBtn" style="width:100%">🚪 Выйти</button>
@@ -2697,6 +2705,49 @@ function showAuthModal() {
       const el = document.getElementById('authRatingDisplay');
       if (el) el.textContent = `⭐ Рейтинг: ${r?.rating || 1000}`;
     });
+
+    // Смена ника
+    const showInput = () => {
+      const box = document.getElementById('authChangeNameBox');
+      const input = document.getElementById('authNewNameInput');
+      if (box && input) { box.style.display = 'block'; input.value = window.FB.getMyName(); setTimeout(() => input.focus(), 50); }
+    };
+    const hideInput = () => {
+      const box = document.getElementById('authChangeNameBox');
+      if (box) box.style.display = 'none';
+    };
+    document.getElementById('authChangeNameBtn')?.addEventListener('click', showInput);
+    document.getElementById('authCancelNameBtn')?.addEventListener('click', hideInput);
+    document.getElementById('authSaveNameBtn')?.addEventListener('click', async () => {
+      const input = document.getElementById('authNewNameInput');
+      const newName = (input?.value || '').trim();
+      if (!newName) { alert('Имя не может быть пустым'); return; }
+      if (newName.length > 20) { alert('Максимум 20 символов'); return; }
+      const btn = document.getElementById('authSaveNameBtn');
+      btn.disabled = true; btn.textContent = '⏳...';
+      // Сохраняем в localStorage (приоритет над user_metadata)
+      window.FB.setMyName(newName);
+      // Обновляем в Supabase duel_ratings (если есть запись)
+      try {
+        const myUid = window.FB.getMyUid();
+        await fetch(`${_SB_REST}/duel_ratings?uid=eq.${myUid}`, {
+          method: 'PATCH', headers: _SB_HDR, mode: 'cors',
+          body: JSON.stringify({ name: newName })
+        });
+      } catch(e) { console.warn('не удалось обновить имя в duel_ratings', e); }
+      // Обновляем UI
+      const h2 = document.getElementById('authProfileName');
+      if (h2) h2.textContent = newName;
+      hideInput();
+      btn.disabled = false; btn.textContent = 'Сохранить';
+      updateAuthButton();
+      // Если сейчас в дуэли — обновим HUD
+      if (typeof duelMyName !== 'undefined' && $('myDuelName')) {
+        $('myDuelName').textContent = newName;
+      }
+      console.log('[SUDOKU] ник изменён на', newName);
+    });
+
     $('authSignOutBtn')?.addEventListener('click', async () => {
       await window.FB.signOut();
       hideModal();
