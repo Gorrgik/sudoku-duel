@@ -2368,6 +2368,12 @@ function formatTime(sec) {
 /* ============== GAME FLOW ============== */
 
 function newGame(levelKey) {
+  // Защита: если случайно остался duel-state, чистим
+  duelPuzzle = null;
+  duelSolution = null;
+  duelBoard = null;
+  duelCode = null;
+
   const cfg = LEVELS[levelKey];
   const { puzzle, solution } = generatePuzzle(cfg.clues);
   state = {
@@ -2447,9 +2453,10 @@ function showWinModal({ level, elapsed, errorCount, moves }) {
   modal.innerHTML = `
     <h2>🎉 Победа!</h2>
     <div class="modal-sub">${cfg.label} · ${formatTime(elapsed)} · ${errorCount} ошибок · ${moves} ходов</div>
+    <div style="color:var(--text-dim);font-size:0.85rem;margin-bottom:8px;">Рекорд сохранён автоматически. Можешь изменить имя:</div>
     <div class="name-input-row">
-      <input type="text" id="playerName" placeholder="Твоё имя" maxlength="20" value="${getDefaultName()}">
-      <button class="btn primary" id="saveRecBtn">Сохранить</button>
+      <input type="text" id="playerName" placeholder="Твоё имя" maxlength="20" value="${escapeHtml(getDefaultName())}">
+      <button class="btn primary" id="saveRecBtn">Сохранить имя</button>
     </div>
     <div class="modal-actions">
       <button class="btn" id="winNewBtn">🔄 Новая игра</button>
@@ -2457,12 +2464,32 @@ function showWinModal({ level, elapsed, errorCount, moves }) {
     </div>
   `;
   showModal();
+
+  // АВТОСОХРАНЕНИЕ — рекорд записывается сразу при победе (имя по умолчанию)
+  const defaultName = getDefaultName() || window.FB?.getMyName() || 'Аноним';
+  saveRecord({
+    name: defaultName,
+    level: level,
+    seconds: elapsed,
+    errors: errorCount,
+    moves: moves,
+    date: new Date().toISOString()
+  }).catch(e => console.error('[SUDOKU] автосохранение рекорда:', e));
+
   $('playerName').focus();
   $('playerName').addEventListener('keydown', e => {
     if (e.key === 'Enter') $('saveRecBtn').click();
   });
   $('saveRecBtn').addEventListener('click', async () => {
     const name = $('playerName').value.trim().slice(0, 30) || 'Аноним';
+    localStorage.setItem('sudoku_last_name', name);
+    // Обновляем запись — пересохраняем с новым именем (удаляем старую с дефолтом)
+    const records = loadRecords();
+    // Удаляем только что добавленную запись с дефолтным именем
+    if (records.length) {
+      records.shift();
+      localStorage.setItem(RECORDS_KEY, JSON.stringify(records));
+    }
     await saveRecord({
       name,
       level: level,
