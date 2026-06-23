@@ -2203,23 +2203,17 @@ function getCellEl(r, c) {
 }
 
 function selectCell(r, c) {
-  // Если выбрана цифра на нумпаде — ставим её в клетку
+  // Если выбрана цифра на нумпаде — ставим её в клетку (авто-режим)
   if (selectedDigit !== null && autoPlaceMode) {
     placeNumber(selectedDigit);
-    // Не снимаем выделение digit — можно ставить ту же цифру в несколько клеток подряд
+    // В авто-режиме сохраняем selectedDigit — можно ставить ту же цифру в несколько клеток
     return;
   }
-  if (selectedDigit !== null && !autoPlaceMode) {
-    // Режим выключен — просто снимаем выделение цифры
-    clearDigitHighlight();
-    selectedDigit = null;
-  }
+  // В обычном режиме: клик по клетке снимает подсветку цифры
+  clearDigitHighlight();
   const prev = selectedCell ? (selectedCell.r * 9 + selectedCell.c) : -1;
   selectedCell = { r, c };
-  // При выборе клетки снимаем подсветку цифры (режим "найти все")
-  clearDigitHighlight();
   highlightSelection();
-  // Звук выбора (не при повторном клике на ту же клетку)
   if (prev !== r * 9 + c) playSelect();
 }
 
@@ -2258,27 +2252,29 @@ function renderNumPad() {
     updateNumRemaining(n, btn);
     btn.addEventListener('click', () => {
       playClick();
-      // Если включён авто-режим — просто выбираем цифру (НЕ ставим сразу)
-      if (autoPlaceMode) {
-        selectedDigit = (selectedDigit === n) ? null : n;
-        // подсветить только цифру (без строк/столбцов)
+      // Подсветка ВСЕГДА при клике на цифру (toggle: повторный клик снимает)
+      if (digitHighlightN === n && selectedDigit === n) {
+        // повторный клик той же цифры — снимаем выделение
         clearDigitHighlight();
-        if (selectedDigit !== null) {
-          digitHighlightN = n;
-          for (let r = 0; r < 9; r++) {
-            for (let c = 0; c < 9; c++) {
-              const boardVal = state?.user[r][c] !== 0
-                ? state.user[r][c]
-                : state.puzzle[r][c];
-              if (boardVal === n) {
-                getCellEl(r, c)?.classList.add('same-num');
-              }
+      } else {
+        clearDigitHighlight();
+        selectedDigit = n;
+        digitHighlightN = n;
+        // подсветить все клетки с этой цифрой
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            const boardVal = state?.user[r][c] !== 0
+              ? state.user[r][c]
+              : state.puzzle[r][c];
+            if (boardVal === n) {
+              getCellEl(r, c)?.classList.add('same-num');
             }
           }
-          btn.classList.add('active');
         }
-      } else {
-        // Обычный режим — ставим в выбранную клетку
+        btn.classList.add('active');
+      }
+      // Если выключен авто-режим и есть выбранная клетка — ставим цифру
+      if (!autoPlaceMode && selectedCell) {
         placeNumber(n);
       }
     });
@@ -2309,7 +2305,7 @@ function updateNumRemaining(n, btn) {
 function placeNumber(n) {
   if (!state || !state.started) return;
 
-  clearDigitHighlight();
+  // НЕ стираем подсветку здесь — пусть остаётся видимой
   if (!selectedCell) return;
   const { r, c } = selectedCell;
 
@@ -3318,23 +3314,57 @@ async function showRatingHistory(uid, name) {
 
 // Изменить рейтинг вручную
 async function editUserRating(uid, name, currentR) {
-  const newR = prompt(`Новый рейтинг для ${name || uid.slice(0,8)} (сейчас ${currentR}):`, currentR);
-  if (newR === null) return;
-  const num = parseInt(newR, 10);
-  if (isNaN(num) || num < 0) { alert('Введите число >= 0'); return; }
-  const oldR = currentR;
-  const delta = num - oldR;
-  await fetch(`${_SB_REST}/duel_ratings?uid=eq.${uid}`, {
-    method: 'PATCH', headers: _SB_HDR, mode: 'cors',
-    body: JSON.stringify({ rating: num })
+  // Показываем модалку с инпутом (prompt() может блокироваться на GitHub Pages)
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="duel-modal-step">
+      <h2>✏️ Изменить рейтинг</h2>
+      <div class="modal-sub">${escapeHtml(name || uid.slice(0,8))} · сейчас: ${currentR}</div>
+      <div class="cloud-fields">
+        <label>Новый рейтинг</label>
+        <input type="number" id="newRatingInput" min="0" value="${currentR}" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--accent);background:var(--bg-soft);color:var(--text);font-size:1.1rem;">
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn primary" id="saveRatingBtn" style="flex:1">💾 Сохранить</button>
+        <button class="btn ghost" id="cancelRatingBtn" style="flex:1">Отмена</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modal')?.classList.remove('hidden');
+  setTimeout(() => document.getElementById('newRatingInput')?.focus(), 50);
+
+  document.getElementById('cancelRatingBtn').addEventListener('click', () => {
+    showAdminPanel();
+    setTimeout(() => document.getElementById('adminTabRatings')?.click(), 50);
   });
-  // Логируем в историю
-  await fetch(`${_SB_REST}/rating_history`, {
-    method: 'POST', headers: _SB_HDR, mode: 'cors',
-    body: JSON.stringify({ uid, name, old_rating: oldR, new_rating: num, delta, source: 'admin', duel_code: null, created_at: Date.now() })
+
+  document.getElementById('saveRatingBtn').addEventListener('click', async () => {
+    const input = document.getElementById('newRatingInput');
+    const num = parseInt(input?.value, 10);
+    if (isNaN(num) || num < 0) { alert('Введите число >= 0'); return; }
+    const oldR = currentR;
+    const delta = num - oldR;
+    const btn = document.getElementById('saveRatingBtn');
+    btn.disabled = true; btn.textContent = '⏳...';
+    try {
+      // PATCH рейтинга
+      await fetch(`${_SB_REST}/duel_ratings?uid=eq.${uid}`, {
+        method: 'PATCH', headers: _SB_HDR, mode: 'cors',
+        body: JSON.stringify({ rating: num })
+      });
+      // Запись в историю
+      await fetch(`${_SB_REST}/rating_history`, {
+        method: 'POST', headers: _SB_HDR, mode: 'cors',
+        body: JSON.stringify({ uid, name, old_rating: oldR, new_rating: num, delta, source: 'admin', duel_code: null, created_at: Date.now() })
+      });
+      alert(`Рейтинг изменён: ${oldR} → ${num}`);
+      showAdminPanel();
+      setTimeout(() => document.getElementById('adminTabRatings')?.click(), 50);
+    } catch(e) {
+      alert('Ошибка: ' + e.message);
+      btn.disabled = false; btn.textContent = '💾 Сохранить';
+    }
   });
-  alert(`Рейтинг изменён: ${oldR} → ${num}`);
-  showAdminRatings();
 }
 
 // ─── Раздел «Дуэли» (комнаты) — мониторинг и удаление ───
