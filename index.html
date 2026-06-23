@@ -2878,16 +2878,20 @@ async function showAdminPanel() {
       <div id="adminStats" style="text-align:left;margin:12px 0;">
         <div style="color:var(--text-dim)">Загрузка...</div>
       </div>
-      <div style="display:flex;gap:8px;margin:16px 0 8px;">
-        <button class="btn primary" id="adminTabRecords" style="flex:1">🏆 Рекорды</button>
-        <button class="btn primary" id="adminTabRatings" style="flex:1">⚔️ Рейтинг</button>
-        <button class="btn primary" id="adminTabRooms" style="flex:1">🎮 Дуэли</button>
+      <div style="display:flex;gap:6px;margin:16px 0 8px;flex-wrap:wrap;">
+        <button class="btn primary" id="adminTabMonitor" style="flex:1;min-width:80px">📊 Мониторинг</button>
+        <button class="btn primary" id="adminTabRecords" style="flex:1;min-width:80px">🏆 Рекорды</button>
+        <button class="btn primary" id="adminTabRatings" style="flex:1;min-width:80px">⚔️ Рейтинг</button>
+        <button class="btn primary" id="adminTabRooms" style="flex:1;min-width:80px">🎮 Дуэли</button>
       </div>
       <div id="adminSection" style="text-align:left;margin:8px 0;">
         <div style="color:var(--text-dim)">Выберите раздел</div>
       </div>
       <div id="adminActions" style="display:flex;flex-direction:column;gap:8px;"></div>
-      <div style="margin-top:16px;"><button class="btn ghost" id="adminCloseBtn">Закрыть</button></div>
+      <div style="margin-top:16px;display:flex;gap:8px;">
+        <button class="btn ghost" id="adminCloseBtn" style="flex:1">✕ Закрыть панель</button>
+        <button class="btn ghost" id="adminLogoutBtn" style="flex:1;color:var(--warn)">🚪 Выйти из аккаунта</button>
+      </div>
     </div>
   `;
   const m = document.getElementById('modal');
@@ -2903,6 +2907,11 @@ async function showAdminPanel() {
 
   const statsDiv = document.getElementById('adminStats');
   document.getElementById('adminCloseBtn').addEventListener('click', () => {
+    document.getElementById('modal')?.classList.add('hidden');
+  });
+  document.getElementById('adminLogoutBtn')?.addEventListener('click', async () => {
+    if (!confirm('Выйти из аккаунта? Это разлогинит тебя из Google.')) return;
+    await window.FB.signOut();
     document.getElementById('modal')?.classList.add('hidden');
   });
 
@@ -2941,6 +2950,8 @@ async function showAdminPanel() {
   document.getElementById('adminTabRatings').addEventListener('click', () => showAdminRatings());
   // ── Раздел: Дуэли (комнаты) ──
   document.getElementById('adminTabRooms').addEventListener('click', () => showAdminRooms());
+  // ── Раздел: Мониторинг (онлайн, пользователи, дуэли) ──
+  document.getElementById('adminTabMonitor').addEventListener('click', () => showAdminMonitor());
 }
 
 // Live-refresh таймер для админки (для вкладки Дуэли)
@@ -3240,6 +3251,273 @@ async function openAdminBoard(code) {
     showAdminPanel();
     // сразу переключаемся на вкладку Дуэли
     setTimeout(() => document.getElementById('adminTabRooms')?.click(), 50);
+  });
+}
+
+// ─── Раздел «Мониторинг»: онлайн, пользователи, активные дуэли ───
+async function showAdminMonitor() {
+  if (_adminRefreshTimer) { clearInterval(_adminRefreshTimer); _adminRefreshTimer = null; }
+
+  const section = document.getElementById('adminSection');
+  const actionsDiv = document.getElementById('adminActions');
+  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
+  actionsDiv.innerHTML = '';
+
+  const render = async () => {
+    try {
+      // 1. Активные дуэли
+      const roomsR = await fetch(`${_SB_REST}/duel_rooms?select=code,status,player1_name,player1_uid,player1_rating,player1_correct,player1_errors,player2_name,player2_uid,player2_rating,player2_correct,player2_errors,created_at&order=created_at.desc&limit=100`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+      const rooms = await roomsR.json();
+
+      // 2. Пользователи (из duel_ratings)
+      const usersR = await fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins,wins&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+      const users = await usersR.json();
+
+      // 3. Matchmaking (кто ищет соперника)
+      const queueR = await fetch(`${_SB_REST}/matchmaking?select=uid,name,rating,created_at&status=eq.waiting`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+      const queue = await queueR.json();
+
+      const playing = rooms.filter(r => r.status === 'playing');
+      const waiting = rooms.filter(r => r.status === 'waiting');
+      const finished = rooms.filter(r => ['p1_won','p2_won','p1_quit','p2_quit'].includes(r.status));
+      const onlineCount = playing.length * 2 + queue.length;
+
+      const statusColor = s => ({playing:'var(--good)', waiting:'var(--warn)', p1_won:'var(--accent)', p2_won:'var(--accent)', p1_quit:'var(--text-dim)', p2_quit:'var(--text-dim)'}[s] || 'var(--text-dim)');
+      const statusLabel = s => ({playing:'🎮 играют', waiting:'⏳ ожидает', p1_won:'✅ победа p1', p2_won:'✅ победа p2', p1_quit:'🚪 p1 вышел', p2_quit:'🚪 p2 вышел'}[s] || s);
+
+      let html = `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:1.6rem;font-weight:bold;color:var(--good)">${onlineCount}</div>
+            <div style="font-size:0.75rem;color:var(--text-dim)">Онлайн</div>
+          </div>
+          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:1.6rem;font-weight:bold;color:var(--accent)">${playing.length}</div>
+            <div style="font-size:0.75rem;color:var(--text-dim)">Активных дуэлей</div>
+          </div>
+          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:1.6rem;font-weight:bold;color:var(--warn)">${queue.length}</div>
+            <div style="font-size:0.75rem;color:var(--text-dim)">В очереди</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:1.4rem;font-weight:bold">${users.length}</div>
+            <div style="font-size:0.75rem;color:var(--text-dim)">Всего игроков</div>
+          </div>
+          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:1.4rem;font-weight:bold">${finished.length}</div>
+            <div style="font-size:0.75rem;color:var(--text-dim)">Завершено</div>
+          </div>
+          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:1.4rem;font-weight:bold">${waiting.length}</div>
+            <div style="font-size:0.75rem;color:var(--text-dim)">Ждут 2-го</div>
+          </div>
+        </div>
+
+        <div style="font-weight:bold;margin:12px 0 6px;">📋 Активные дуэли</div>
+      `;
+
+      if (playing.length === 0 && waiting.length === 0) {
+        html += '<div style="color:var(--text-dim);padding:8px 0;">Нет активных дуэлей</div>';
+      } else {
+        [...playing, ...waiting].slice(0, 20).forEach(room => {
+          const p1Name = room.player1_name || '—';
+          const p2Name = room.player2_name || '—';
+          html += `
+            <div style="background:var(--bg-soft);padding:8px 10px;border-radius:6px;margin-bottom:6px;font-size:0.85rem;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <span style="font-family:monospace;color:var(--accent);font-weight:bold">${escapeHtml(room.code)}</span>
+                <span style="color:${statusColor(room.status)};font-size:0.75rem">${statusLabel(room.status)}</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;">
+                <div>
+                  <b style="color:var(--good)">${escapeHtml(p1Name)}</b>
+                  <span style="color:var(--text-dim);font-size:0.75rem"> ${room.player1_rating || 1000}</span>
+                  <span style="color:var(--text-dim);font-size:0.75rem"> · ${room.player1_correct||0}✓ ${room.player1_errors||0}✗</span>
+                </div>
+                <span style="color:var(--text-dim)">vs</span>
+                <div>
+                  <b style="color:var(--accent)">${escapeHtml(p2Name)}</b>
+                  <span style="color:var(--text-dim);font-size:0.75rem"> ${room.player2_rating || 1000}</span>
+                  <span style="color:var(--text-dim);font-size:0.75rem"> · ${room.player2_correct||0}✓ ${room.player2_errors||0}✗</span>
+                </div>
+              </div>
+              <div style="display:flex;gap:4px;margin-top:6px;">
+                <button class="btn ghost admin-mon-view" data-code="${escapeHtml(room.code)}" style="flex:1;padding:3px;font-size:0.75rem">👁 Доска</button>
+                <button class="btn ghost admin-mon-winner" data-code="${escapeHtml(room.code)}" style="flex:1;padding:3px;font-size:0.75rem;color:var(--good)">🏆 Победитель</button>
+                <button class="btn ghost admin-mon-del" data-code="${escapeHtml(room.code)}" style="flex:0;padding:3px 8px;font-size:0.75rem;color:var(--warn)">🗑</button>
+              </div>
+            </div>
+          `;
+        });
+      }
+
+      // Топ-10 игроков
+      html += `<div style="font-weight:bold;margin:16px 0 6px;">👥 Игроки (топ-${Math.min(10, users.length)})</div>`;
+      if (!users.length) {
+        html += '<div style="color:var(--text-dim);font-size:0.85rem">Пока нет зарегистрированных</div>';
+      } else {
+        html += '<div style="background:var(--bg-soft);padding:8px 10px;border-radius:6px;font-size:0.85rem;">';
+        users.slice(0, 10).forEach((u, i) => {
+          html += `<div style="display:grid;grid-template-columns:24px 1fr 70px 50px;gap:6px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+            <span style="color:var(--text-dim)">${i+1}</span>
+            <span>${escapeHtml(u.name || u.uid?.slice(0,8) || '—')}</span>
+            <span style="color:var(--accent);font-weight:bold;text-align:right">${u.rating ?? 1000}</span>
+            <span style="color:var(--text-dim);text-align:right">${u.games||0} игр</span>
+          </div>`;
+        });
+        html += '</div>';
+      }
+
+      // Очередь matchmaking
+      if (queue.length) {
+        html += `<div style="font-weight:bold;margin:16px 0 6px;">🔍 В очереди matchmaking</div>`;
+        queue.forEach(q => {
+          html += `<div style="background:var(--bg-soft);padding:6px 10px;border-radius:6px;margin-bottom:4px;font-size:0.85rem;">
+            <b>${escapeHtml(q.name || '—')}</b>
+            <span style="color:var(--text-dim)"> · рейтинг ${q.rating || 1000}</span>
+            <span style="color:var(--text-dim);font-size:0.75rem;float:right">${escapeHtml((q.uid||'').slice(0,8))}</span>
+          </div>`;
+        });
+      }
+
+      html += `<div style="color:var(--text-dim);font-size:0.7rem;margin-top:8px;text-align:right">Обновлено: ${new Date().toLocaleTimeString('ru-RU')}</div>`;
+      section.innerHTML = html;
+
+      // Обработчики кнопок
+      section.querySelectorAll('.admin-mon-view').forEach(b => b.addEventListener('click', () => openAdminBoard(b.dataset.code)));
+      section.querySelectorAll('.admin-mon-del').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Удалить комнату ' + b.dataset.code + '?')) return;
+        await fetch(`${_SB_REST}/duel_rooms?code=eq.${b.dataset.code}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
+        render();
+      }));
+      section.querySelectorAll('.admin-mon-winner').forEach(b => b.addEventListener('click', () => declareWinner(b.dataset.code)));
+
+    } catch(e) {
+      section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
+    }
+  };
+
+  await render();
+
+  // Автообновление каждые 5 сек (для онлайн-счётчика)
+  _adminRefreshTimer = setInterval(render, 5000);
+
+  const refreshBtn = document.createElement('button');
+  refreshBtn.className = 'btn ghost';
+  refreshBtn.style.width = '100%';
+  refreshBtn.style.textAlign = 'left';
+  refreshBtn.textContent = '🔄 Обновить сейчас';
+  refreshBtn.addEventListener('click', render);
+  actionsDiv.appendChild(refreshBtn);
+}
+
+// ─── Объявить победителя дуэли (админ) ───
+async function declareWinner(code) {
+  try {
+    const r = await fetch(`${_SB_REST}/duel_rooms?code=eq.${code}&limit=1`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+    const data = await r.json();
+    if (!data || !data[0]) { alert('Комната не найдена'); return; }
+    const room = data[0];
+    if (room.status !== 'playing') { alert('Дуэль уже завершена (' + room.status + ')'); return; }
+
+    const p1Name = room.player1_name || 'P1';
+    const p2Name = room.player2_name || 'P2';
+    const p1Score = `${room.player1_correct||0}✓/${room.player1_errors||0}✗`;
+    const p2Score = `${room.player2_correct||0}✓/${room.player2_errors||0}✗`;
+    const p1Rate = room.player1_rating || 1000;
+    const p2Rate = room.player2_rating || 1000;
+
+    const modal = document.getElementById('modalContent');
+    modal.innerHTML = `
+      <div class="duel-modal-step">
+        <h2>🏆 Объявить победителя</h2>
+        <div class="modal-sub">Код: ${escapeHtml(code)}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0;">
+          <button class="btn primary" id="declareP1" style="padding:16px 8px;line-height:1.4;">
+            <div style="font-size:1.1rem;font-weight:bold">🏆 P1</div>
+            <div style="font-size:0.85rem;margin-top:4px">${escapeHtml(p1Name)}</div>
+            <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px">рейтинг ${p1Rate} · ${p1Score}</div>
+          </button>
+          <button class="btn primary" id="declareP2" style="padding:16px 8px;line-height:1.4;">
+            <div style="font-size:1.1rem;font-weight:bold">🏆 P2</div>
+            <div style="font-size:0.85rem;margin-top:4px">${escapeHtml(p2Name)}</div>
+            <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px">рейтинг ${p2Rate} · ${p2Score}</div>
+          </button>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn ghost" id="declareDraw" style="flex:1">🤝 Ничья (без рейтинга)</button>
+          <button class="btn ghost" id="declareCancel" style="flex:1">← Назад</button>
+        </div>
+      </div>
+    `;
+    document.getElementById('modal')?.classList.remove('hidden');
+
+    document.getElementById('declareP1').addEventListener('click', () => applyWinner(code, 'p1_won'));
+    document.getElementById('declareP2').addEventListener('click', () => applyWinner(code, 'p2_won'));
+    document.getElementById('declareDraw').addEventListener('click', () => applyWinner(code, 'draw'));
+    document.getElementById('declareCancel').addEventListener('click', () => {
+      showAdminPanel();
+      setTimeout(() => document.getElementById('adminTabMonitor')?.click(), 50);
+    });
+  } catch(e) { alert('Ошибка: ' + e.message); }
+}
+
+async function applyWinner(code, result) {
+  try {
+    // Обновляем статус комнаты
+    const status = result === 'draw' ? 'draw' : result;
+    const dr = await fetch(`${_SB_REST}/duel_rooms?code=eq.${code}`, {
+      method: 'PATCH', headers: _SB_HDR, mode: 'cors',
+      body: JSON.stringify({ status })
+    });
+    if (!dr.ok) { alert('Не удалось обновить комнату: ' + dr.status); return; }
+
+    // Если есть победитель — обновляем рейтинги
+    if (result === 'p1_won' || result === 'p2_won') {
+      const r = await fetch(`${_SB_REST}/duel_rooms?code=eq.${code}&limit=1`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+      const data = await r.json();
+      const room = data[0];
+      const myR = result === 'p1_won' ? (room.player1_rating || 1000) : (room.player2_rating || 1000);
+      const oppR = result === 'p1_won' ? (room.player2_rating || 1000) : (room.player1_rating || 1000);
+      const K = 30;
+      const expected = 1 / (1 + Math.pow(10, (oppR - myR) / 400));
+      const delta = Math.round(K * (1 - expected));
+
+      const winnerUid = result === 'p1_won' ? room.player1_uid : room.player2_uid;
+      const loserUid = result === 'p1_won' ? room.player2_uid : room.player1_uid;
+      const winnerName = result === 'p1_won' ? room.player1_name : room.player2_name;
+      const loserName = result === 'p1_won' ? room.player2_name : room.player1_name;
+
+      // Админ сам обновляет рейтинги (так как он объявил победителя)
+      await updateUserRating(winnerUid, winnerName, delta);
+      await updateUserRating(loserUid, loserName, -delta);
+      alert(`Победитель: ${winnerName} (+${delta})\nПроигравший: ${loserName} (-${delta})`);
+    } else {
+      alert('Ничья — рейтинги не изменены');
+    }
+    showAdminPanel();
+    setTimeout(() => document.getElementById('adminTabMonitor')?.click(), 50);
+  } catch(e) { alert('Ошибка: ' + e.message); }
+}
+
+async function updateUserRating(uid, name, delta) {
+  if (!uid) return;
+  const r = await fetch(`${_SB_REST}/duel_ratings?uid=eq.${uid}&limit=1`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+  const data = await r.json();
+  const cur = data && data[0];
+  const oldR = cur ? Number(cur.rating || 1000) : 1000;
+  const newR = Math.max(0, oldR + delta);
+  const payload = { uid, rating: newR, name: name || cur?.name || 'Игрок' };
+  if (cur) {
+    payload.games = (cur.games || 0) + 1;
+    if (delta > 0) payload.wins = (cur.wins || 0) + 1;
+  }
+  await fetch(`${_SB_REST}/duel_ratings`, {
+    method: 'POST', headers: { ..._SB_HDR, 'Prefer': 'resolution=merge-duplicates' }, mode: 'cors',
+    body: JSON.stringify(payload)
   });
 }
 
