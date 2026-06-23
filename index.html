@@ -279,8 +279,29 @@
     signOut,
     getAuthStatus,
 
-    async saveRecord(rec) { return false; }, // пока без Firestore
-    async loadRecords() { return null; },
+    async saveRecord(rec) {
+      if (!sbOk) return false;
+      try {
+        const payload = { ...rec };
+        if (currentUser) payload.uid = currentUser.id;
+        payload.created_at = Date.now();
+        const r = await fetch(`${SB}/single_records`, {
+          method: 'POST', headers: HDR, mode: 'cors', body: JSON.stringify(payload)
+        });
+        return r.ok;
+      } catch(e) { return false; }
+    },
+    async loadRecords() {
+      if (!sbOk) return null;
+      try {
+        const r = await fetch(`${SB}/single_records?select=*&order=seconds.asc&limit=100`, {
+          method: 'GET', headers: HDR, mode: 'cors', cache: 'no-store'
+        });
+        if (!r.ok) return null;
+        const data = await r.json();
+        return Array.isArray(data) ? data : [];
+      } catch(e) { return null; }
+    },
 
     async createDuelRoom(puzzle, solution, playerName) {
       if (!sbOk) return null;
@@ -2655,17 +2676,10 @@ function renderRecordsList(records, cloudOk = false) {
     <div class="records-list">${rows}</div>
     <div class="modal-actions">
       <button class="btn primary" id="recCloseBtn">Закрыть</button>
-      <button class="btn danger" id="recClearBtn" ${records.length === 0 ? 'style="display:none"' : ''}>🗑 Очистить</button>
     </div>
   `;
   showModal();
   $('recCloseBtn').addEventListener('click', hideModal);
-  $('recClearBtn')?.addEventListener('click', () => {
-    if (confirm('Удалить все рекорды? (Только локально)')) {
-      localStorage.removeItem(RECORDS_KEY);
-      renderRecordsList([]);
-    }
-  });
 }
 
 function escapeHtml(s) {
@@ -2966,7 +2980,7 @@ async function showAdminPanel() {
   statsDiv.innerHTML = html;
 
   // ── Раздел: Таблица рекордов ──
-  document.getElementById('adminTabRecords').addEventListener('click', () => showAdminRecords(localRecs));
+  document.getElementById('adminTabRecords').addEventListener('click', () => showAdminRecords());
   // ── Раздел: Рейтинг дуэлей ──
   document.getElementById('adminTabRatings').addEventListener('click', () => showAdminRatings());
   // ── Раздел: Дуэли (комнаты) ──
@@ -2978,44 +2992,38 @@ async function showAdminPanel() {
 // Live-refresh таймер для админки (для вкладки Дуэли)
 let _adminRefreshTimer = null;
 
-// ─── Раздел «Таблица рекордов» (одиночная игра) ───
-function showAdminRecords(localRecs) {
+// ─── Раздел «Таблица рекордов» (одиночная игра, из Supabase) ───
+async function showAdminRecords() {
   const section = document.getElementById('adminSection');
   const actionsDiv = document.getElementById('adminActions');
-  section.innerHTML = '';
+  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
   actionsDiv.innerHTML = '';
 
-  if (!localRecs.length) {
-    section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рекордов нет</div>';
-  } else {
-    let html = '<div style="max-height:300px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;">';
-    html += '<div style="display:grid;grid-template-columns:30px 1fr 80px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span>#</span><span>Имя</span><span>Время</span><span>Сложн.</span></div>';
-    localRecs.slice(0, 50).forEach((r, i) => {
-      const t = formatTime(r.seconds || 0);
-      html += `<div style="display:grid;grid-template-columns:30px 1fr 80px 60px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);">
-        <span style="color:var(--text-dim)">${i+1}</span>
-        <span>${escapeHtml(r.name || '—')}</span>
-        <span>${t}</span>
-        <span style="color:var(--text-dim)">${r.difficulty || '—'}</span>
-      </div>`;
-    });
-    html += '</div>';
-    section.innerHTML = html;
+  try {
+    const r = await fetch(`${_SB_REST}/single_records?select=*&order=seconds.asc&limit=50`, { method: 'GET', headers: _SB_HDR, mode: 'cors', cache: 'no-store' });
+    const data = await r.json();
+    if (!Array.isArray(data) || !data.length) {
+      section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рекордов нет</div>';
+    } else {
+      let html = '<div style="max-height:300px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;">';
+      html += '<div style="display:grid;grid-template-columns:30px 1fr 70px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span>#</span><span>Имя</span><span>Время</span><span>Сложн.</span></div>';
+      data.forEach((r, i) => {
+        const t = formatTime(r.seconds || 0);
+        html += `<div style="display:grid;grid-template-columns:30px 1fr 70px 60px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);">
+          <span style="color:var(--text-dim)">${i+1}</span>
+          <span>${escapeHtml(r.name || '—')}</span>
+          <span>${t}</span>
+          <span style="color:var(--text-dim)">${r.level || '—'}</span>
+        </div>`;
+      });
+      html += '</div>';
+      section.innerHTML = html;
+    }
+  } catch(e) {
+    section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
   }
 
-  // Действия
-  const btn = document.createElement('button');
-  btn.className = 'btn ghost';
-  btn.style.width = '100%';
-  btn.style.textAlign = 'left';
-  btn.textContent = '🗑️ Очистить все рекорды';
-  btn.addEventListener('click', () => {
-    if (!confirm('Удалить ВСЕ локальные рекорды?')) return;
-    localStorage.removeItem('sudoku_records_v1');
-    alert('OK');
-    showAdminPanel();
-  });
-  actionsDiv.appendChild(btn);
+  actionsDiv.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Рекорды хранятся в Supabase (single_records)</div>';
 }
 
 // ─── Раздел «Рейтинг дуэлей» (Supabase duel_ratings) ───
