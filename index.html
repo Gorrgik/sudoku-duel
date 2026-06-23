@@ -219,15 +219,26 @@
   }
 
   // ── Rating ────────────────────────────────────────────────────────
-  async function upsertRating(delta, uid, name) {
+  async function upsertRating(delta, uid, name, source, code) {
     console.log('[SUDOKU] upsertRating called: delta=', delta, 'uid=', uid, 'name=', name, 'sbOk=', sbOk);
     if (!sbOk) { console.warn('[SUDOKU] upsertRating: sbOk=false, skipping'); return; }
     uid = uid || myUid;
     name = name || myName || 'Игрок';
+    // Не пишем в рейтинг для анонимных пользователей
+    if (uid === myUid && !currentUser) {
+      console.log('[SUDOKU] upsertRating: anon user, skip');
+      return;
+    }
+    // Проверка бана
+    if (uid === myUid && await isBanned()) {
+      console.log('[SUDOKU] upsertRating: banned, skip');
+      return;
+    }
     try {
       const [snap] = await sbGet('duel_ratings', `uid=eq.${uid}&limit=1`);
       if (snap) {
-        const newRating = Math.max(0, (snap.rating || 1000) + delta);
+        const oldR = snap.rating || 1000;
+        const newRating = Math.max(0, oldR + delta);
         await sbUpdate('duel_ratings', `uid=eq.${uid}`, {
           rating: newRating,
           games: (snap.games || 0) + 1,
@@ -237,21 +248,28 @@
         });
         console.log('[SUDOKU] upsertRating: updated uid=', uid, 'newRating=', newRating);
         if (uid === myUid) myRating = newRating;
+        logRatingChange(uid, name, oldR, newRating, source, code);
       } else {
-        const newRating = Math.max(0, 1000 + delta);
+        const oldR = 1000;
+        const newRating = Math.max(0, oldR + delta);
         await sbUpsert('duel_ratings', { uid, name, rating: newRating, games: 1, wins: delta > 0 ? 1 : 0, last_seen: Date.now() });
         console.log('[SUDOKU] upsertRating: created uid=', uid, 'rating=', newRating);
         if (uid === myUid) myRating = newRating;
+        logRatingChange(uid, name, oldR, newRating, source, code);
       }
     } catch(e) { console.error('[SUDOKU] upsertRating error:', e); }
   }
 
-  // ── Heartbeat: обновляет last_seen каждые 15 сек для отслеживания онлайна ──
+  // ── Heartbeat: обновляет last_seen каждые 15 сек только для ЗАЛОГИНЕННЫХ ──
   let _heartbeatInterval = null;
   async function heartbeat() {
     if (!sbOk || !myUid) return;
+    // Только авторизованные пользователи попадают в рейтинг
+    if (!currentUser) return;
+    // Проверяем бан
+    if (await isBanned()) return;
     try {
-      const name = myName || currentUser?.user_metadata?.name || currentUser?.email?.split('@')[0] || 'Игрок';
+      const name = myName || currentUser.user_metadata?.name || currentUser.email?.split('@')[0] || 'Игрок';
       await sbUpsert('duel_ratings', {
         uid: myUid,
         name,
@@ -264,6 +282,31 @@
     if (_heartbeatInterval) return;
     heartbeat();
     _heartbeatInterval = setInterval(heartbeat, 15000);
+  }
+
+  // ── Проверка бана ─────────────────────────────────────────────────
+  let _banCache = null;
+  async function isBanned() {
+    if (!sbOk || !myUid) return false;
+    if (_banCache && Date.now() - _banCache.checked < 30000) return _banCache.banned;
+    try {
+      const r = await fetch(`${SB}/banned_users?uid=eq.${myUid}&limit=1`, { method: 'GET', headers: HDR, mode: 'cors', cache: 'no-store' });
+      const data = await r.json();
+      const banned = Array.isArray(data) && data.length > 0;
+      _banCache = { banned, checked: Date.now() };
+      return banned;
+    } catch(e) { return false; }
+  }
+  function refreshBanCache() { _banCache = null; }
+
+  // ── Лог изменения рейтинга (для админа/истории) ────────────────
+  async function logRatingChange(uid, name, oldR, newR, source, code) {
+    if (!sbOk || !uid) return;
+    try {
+      await sbPost('rating_history', {
+        uid, name, old_rating: oldR, new_rating: newR, delta: newR - oldR, source: source || '', duel_code: code || null, created_at: Date.now()
+      });
+    } catch(e) { /* молча */ }
   }
 
   // ── Public API ─────────────────────────────────────────────────────
@@ -447,7 +490,7 @@
       window._mmInProgress = false;
     },
 
-    quitDuel: (code, status) => {
+    quitDuel: async (code, status) => {
       if (!sbOk) return;
       // Сначала обновляем localStorage синхронно — opponent увидит через poll
       const localRaw = localStorage.getItem('sudoku_room_' + code);
@@ -459,12 +502,19 @@
         updated.status = status;
         localStorage.setItem('sudoku_room_' + code, JSON.stringify(updated));
       }
-      // Серверное обновление
-      sbUpdate('duel_rooms', `code=eq.${code}`, { status }).then(ok => {
+      // Оповещаем соперника через BroadcastChannel (мгновенно, не дожидаясь poll)
+      try {
+        const bc = new BroadcastChannel('sudoku_duel_' + code);
+        bc.postMessage({ ...updated, status, _quitNotify: true });
+        bc.close();
+      } catch (_) {}
+      // Серверное обновление — ЖДЁМ чтобы оппонент точно увидел
+      try {
+        const ok = await sbUpdate('duel_rooms', `code=eq.${code}`, { status });
         console.log('[SUDOKU] quit sbUpdate:', ok ? 'OK' : 'FAIL');
-      }).catch(e => {
+      } catch(e) {
         console.log('[SUDOKU] quit sbUpdate ERROR:', e);
-      });
+      }
     },
 
     async joinQueue(playerName, rating, onMatch) {
@@ -1340,6 +1390,7 @@
     <button class="btn duel-btn" id="showDuelBtn">⚔️ Дуэль</button>
     <button class="btn ghost" id="showRecordsBtn">🏆 Таблица рекордов</button>
     <button class="btn ghost" id="showDuelRatingsBtn">📊 Рейтинг дуэлей</button>
+    <button class="btn ghost" id="showFeedbackBtn">📨 Сообщить о баге</button>
   </div>
   <div class="footer">Игра автоматически сохраняет прогресс в этом браузере</div>
 </div>
@@ -2959,6 +3010,7 @@ async function showAdminPanel() {
         <button class="btn primary" id="adminTabRecords" style="flex:1;min-width:80px">🏆 Рекорды</button>
         <button class="btn primary" id="adminTabRatings" style="flex:1;min-width:80px">⚔️ Рейтинг</button>
         <button class="btn primary" id="adminTabRooms" style="flex:1;min-width:80px">🎮 Дуэли</button>
+        <button class="btn primary" id="adminTabFeedback" style="flex:1;min-width:80px">📨 Обратная связь</button>
       </div>
       <div id="adminSection" style="text-align:left;margin:8px 0;">
         <div style="color:var(--text-dim)">Выберите раздел</div>
@@ -3028,6 +3080,8 @@ async function showAdminPanel() {
   document.getElementById('adminTabRooms').addEventListener('click', () => showAdminRooms());
   // ── Раздел: Мониторинг (онлайн, пользователи, дуэли) ──
   document.getElementById('adminTabMonitor').addEventListener('click', () => showAdminMonitor());
+  // ── Раздел: Обратная связь ──
+  document.getElementById('adminTabFeedback').addEventListener('click', () => showAdminFeedback());
 }
 
 // Live-refresh таймер для админки (для вкладки Дуэли)
@@ -3041,16 +3095,17 @@ async function showAdminRecords() {
   actionsDiv.innerHTML = '';
 
   try {
-    const r = await fetch(`${_SB_REST}/single_records?select=*&order=seconds.asc&limit=50`, { method: 'GET', headers: _SB_HDR, mode: 'cors', cache: 'no-store' });
+    const r = await fetch(`${_SB_REST}/single_records?select=*&order=seconds.asc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors', cache: 'no-store' });
     const data = await r.json();
     if (!Array.isArray(data) || !data.length) {
       section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рекордов нет</div>';
     } else {
       let html = '<div style="max-height:300px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;">';
-      html += '<div style="display:grid;grid-template-columns:30px 1fr 70px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span>#</span><span>Имя</span><span>Время</span><span>Сложн.</span></div>';
+      html += '<div style="display:grid;grid-template-columns:24px 30px 1fr 70px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span></span><span>#</span><span>Имя</span><span>Время</span><span>Сложн.</span></div>';
       data.forEach((r, i) => {
         const t = formatTime(r.seconds || 0);
-        html += `<div style="display:grid;grid-template-columns:30px 1fr 70px 60px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);">
+        html += `<div style="display:grid;grid-template-columns:24px 30px 1fr 70px 60px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
+          <input type="checkbox" class="admin-rec-chk" data-id="${escapeHtml(r.id)}" style="width:14px;height:14px;">
           <span style="color:var(--text-dim)">${i+1}</span>
           <span>${escapeHtml(r.name || '—')}</span>
           <span>${t}</span>
@@ -3058,13 +3113,55 @@ async function showAdminRecords() {
         </div>`;
       });
       html += '</div>';
+      html += `<div style="color:var(--text-dim);font-size:0.7rem;margin-top:4px;text-align:right">показано ${data.length}</div>`;
       section.innerHTML = html;
     }
   } catch(e) {
     section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
   }
 
-  actionsDiv.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem">Рекорды хранятся в Supabase (single_records)</div>';
+  // Действия
+  const selBtn = document.createElement('button');
+  selBtn.className = 'btn ghost';
+  selBtn.style.width = '100%';
+  selBtn.style.textAlign = 'left';
+  selBtn.textContent = '☑️ Выделить все';
+  selBtn.addEventListener('click', () => {
+    document.querySelectorAll('.admin-rec-chk').forEach(c => c.checked = true);
+  });
+  actionsDiv.appendChild(selBtn);
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'btn ghost';
+  delBtn.style.width = '100%';
+  delBtn.style.textAlign = 'left';
+  delBtn.style.color = 'var(--warn)';
+  delBtn.textContent = '🗑️ Удалить выделенные';
+  delBtn.addEventListener('click', async () => {
+    const ids = Array.from(document.querySelectorAll('.admin-rec-chk:checked')).map(c => c.dataset.id);
+    if (!ids.length) { alert('Ничего не выделено'); return; }
+    if (!confirm(`Удалить ${ids.length} рекордов?`)) return;
+    for (const id of ids) {
+      await fetch(`${_SB_REST}/single_records?id=eq.${id}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
+    }
+    alert('Удалено: ' + ids.length);
+    showAdminRecords();
+  });
+  actionsDiv.appendChild(delBtn);
+
+  const clearAll = document.createElement('button');
+  clearAll.className = 'btn ghost';
+  clearAll.style.width = '100%';
+  clearAll.style.textAlign = 'left';
+  clearAll.style.color = 'var(--warn)';
+  clearAll.textContent = '⚠️ Очистить ВСЕ рекорды';
+  clearAll.addEventListener('click', async () => {
+    if (!confirm('Удалить ВСЕ рекорды? Это необратимо!')) return;
+    const dr = await fetch(`${_SB_REST}/single_records?id=neq.`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
+    alert(dr.ok ? 'OK' : 'Ошибка: ' + dr.status);
+    if (dr.ok) showAdminRecords();
+  });
+  actionsDiv.appendChild(clearAll);
 }
 
 // ─── Раздел «Рейтинг дуэлей» (Supabase duel_ratings) ───
@@ -3075,27 +3172,66 @@ async function showAdminRatings() {
   actionsDiv.innerHTML = '';
 
   try {
-    const r = await fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins&order=rating.desc&limit=100`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-    const data = await r.json();
+    // Загружаем рейтинги + баны параллельно
+    const [ratingsR, bannedR] = await Promise.all([
+      fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }),
+      fetch(`${_SB_REST}/banned_users?select=uid`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }).catch(() => ({ json: async () => [] }))
+    ]);
+    const data = await ratingsR.json();
+    const banned = Array.isArray(await bannedR.json?.() || []) ? await bannedR.json() : [];
+    const bannedSet = new Set(banned.map(b => b.uid));
+
     if (!Array.isArray(data) || !data.length) {
       section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рейтингов нет</div>';
     } else {
       let html = '<div style="max-height:300px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;">';
-      html += '<div style="display:grid;grid-template-columns:30px 1fr 70px 50px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span>#</span><span>Имя</span><span>Рейтинг</span><span>Игр</span><span>Побед</span></div>';
+      html += '<div style="display:grid;grid-template-columns:24px 1fr 70px 50px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span>#</span><span>Имя</span><span>Рейтинг</span><span>Игр</span><span>Побед</span></div>';
       data.forEach((r, i) => {
-        html += `<div style="display:grid;grid-template-columns:30px 1fr 70px 50px 60px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);">
+        const isBanned = bannedSet.has(r.uid);
+        html += `<div style="display:grid;grid-template-columns:24px 1fr 70px 50px 60px 90px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;${isBanned ? 'opacity:0.5;' : ''}">
           <span style="color:var(--text-dim)">${i+1}</span>
-          <span>${escapeHtml(r.name || r.uid?.slice(0,8) || '—')}</span>
+          <span>${isBanned ? '🚫 ' : ''}${escapeHtml(r.name || r.uid?.slice(0,8) || '—')}</span>
           <span style="color:var(--accent);font-weight:bold">${r.rating ?? 1000}</span>
           <span>${r.games ?? 0}</span>
           <span style="color:var(--good)">${r.wins ?? 0}</span>
+          <span style="display:flex;gap:2px;">
+            <button class="btn ghost admin-rating-history" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name||'')}" style="padding:2px 6px;font-size:0.7rem" title="История">📜</button>
+            <button class="btn ghost admin-rating-edit" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name||'')}" data-rating="${r.rating ?? 1000}" style="padding:2px 6px;font-size:0.7rem" title="Изменить рейтинг">✏️</button>
+            <button class="btn ghost admin-rating-ban" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name||'')}" data-banned="${isBanned ? '1' : '0'}" style="padding:2px 6px;font-size:0.7rem;color:${isBanned ? 'var(--good)' : 'var(--warn)'}" title="${isBanned ? 'Разбанить' : 'Забанить'}">${isBanned ? '✓' : '🚫'}</button>
+          </span>
         </div>`;
       });
       html += '</div>';
+      html += '<div style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;text-align:right">показано ' + data.length + '</div>';
       section.innerHTML = html;
+
+      // Обработчики кнопок
+      section.querySelectorAll('.admin-rating-history').forEach(b => b.addEventListener('click', () => showRatingHistory(b.dataset.uid, b.dataset.name)));
+      section.querySelectorAll('.admin-rating-edit').forEach(b => b.addEventListener('click', () => editUserRating(b.dataset.uid, b.dataset.name, Number(b.dataset.rating))));
+      section.querySelectorAll('.admin-rating-ban').forEach(b => b.addEventListener('click', async () => {
+        const uid = b.dataset.uid;
+        const name = b.dataset.name;
+        const wasBanned = b.dataset.banned === '1';
+        if (wasBanned) {
+          if (!confirm(`Разбанить игрока ${name}?`)) return;
+          await fetch(`${_SB_REST}/banned_users?uid=eq.${uid}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
+        } else {
+          if (!confirm(`Забанить игрока ${name}? Он не сможет играть в дуэли.`)) return;
+          await fetch(`${_SB_REST}/banned_users`, { method: 'POST', headers: _SB_HDR, mode: 'cors', body: JSON.stringify({ uid, name, banned_at: Date.now(), banned_by: 'admin' }) });
+        }
+        showAdminRatings();
+      }));
     }
 
     // Действия
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'btn ghost';
+    refreshBtn.style.width = '100%';
+    refreshBtn.style.textAlign = 'left';
+    refreshBtn.textContent = '🔄 Обновить';
+    refreshBtn.addEventListener('click', showAdminRatings);
+    actionsDiv.appendChild(refreshBtn);
+
     const clearAll = document.createElement('button');
     clearAll.className = 'btn ghost';
     clearAll.style.width = '100%';
@@ -3112,6 +3248,70 @@ async function showAdminRatings() {
   } catch(e) {
     section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка загрузки: ' + e.message + '</div>';
   }
+}
+
+// Показать историю изменения рейтинга
+async function showRatingHistory(uid, name) {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="duel-modal-step">
+      <h2>📜 История рейтинга</h2>
+      <div class="modal-sub">${escapeHtml(name || uid.slice(0,8))}</div>
+      <div id="ratingHistoryBox" style="text-align:left;margin:12px 0;color:var(--text-dim)">Загрузка...</div>
+      <button class="btn ghost" id="rhCloseBtn" style="width:100%">← Назад</button>
+    </div>
+  `;
+  document.getElementById('modal')?.classList.remove('hidden');
+  try {
+    const r = await fetch(`${_SB_REST}/rating_history?select=*&uid=eq.${uid}&order=created_at.desc&limit=100`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+    const data = await r.json();
+    const box = document.getElementById('ratingHistoryBox');
+    if (!Array.isArray(data) || !data.length) {
+      box.innerHTML = '<div style="padding:20px 0">История пуста</div>';
+    } else {
+      let html = '<div style="max-height:400px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px;font-size:0.85rem;">';
+      data.forEach(h => {
+        const date = h.created_at ? new Date(h.created_at).toLocaleString('ru-RU') : '';
+        const delta = h.delta || 0;
+        const sourceLabel = {win:'победа', lose:'поражение', quit_win:'соперник сдался', quit_lose:'вы сами сдались', admin:'админ'}[h.source] || h.source;
+        const dColor = delta > 0 ? 'var(--good)' : delta < 0 ? 'var(--warn)' : 'var(--text-dim)';
+        const arrow = delta > 0 ? '↑' : delta < 0 ? '↓' : '·';
+        html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+          <span><span style="color:${dColor}">${arrow}${delta > 0 ? '+' : ''}${delta}</span> · ${escapeHtml(sourceLabel)}${h.duel_code ? ` · ${escapeHtml(h.duel_code)}` : ''}</span>
+          <span style="color:var(--text-dim);font-size:0.75rem">${h.old_rating} → <b style="color:var(--accent)">${h.new_rating}</b> · ${date}</span>
+        </div>`;
+      });
+      html += '</div>';
+      box.innerHTML = html;
+    }
+  } catch(e) {
+    document.getElementById('ratingHistoryBox').innerHTML = '<div style="color:red">Ошибка: ' + e.message + '</div>';
+  }
+  document.getElementById('rhCloseBtn').addEventListener('click', () => {
+    showAdminPanel();
+    setTimeout(() => document.getElementById('adminTabRatings')?.click(), 50);
+  });
+}
+
+// Изменить рейтинг вручную
+async function editUserRating(uid, name, currentR) {
+  const newR = prompt(`Новый рейтинг для ${name || uid.slice(0,8)} (сейчас ${currentR}):`, currentR);
+  if (newR === null) return;
+  const num = parseInt(newR, 10);
+  if (isNaN(num) || num < 0) { alert('Введите число >= 0'); return; }
+  const oldR = currentR;
+  const delta = num - oldR;
+  await fetch(`${_SB_REST}/duel_ratings?uid=eq.${uid}`, {
+    method: 'PATCH', headers: _SB_HDR, mode: 'cors',
+    body: JSON.stringify({ rating: num })
+  });
+  // Логируем в историю
+  await fetch(`${_SB_REST}/rating_history`, {
+    method: 'POST', headers: _SB_HDR, mode: 'cors',
+    body: JSON.stringify({ uid, name, old_rating: oldR, new_rating: num, delta, source: 'admin', duel_code: null, created_at: Date.now() })
+  });
+  alert(`Рейтинг изменён: ${oldR} → ${num}`);
+  showAdminRatings();
 }
 
 // ─── Раздел «Дуэли» (комнаты) — мониторинг и удаление ───
@@ -3390,6 +3590,7 @@ async function showAdminMonitor() {
         </div>
 
         <div style="font-weight:bold;margin:12px 0 6px;">📋 Активные дуэли</div>
+        <div style="max-height:240px;overflow-y:auto;">
       `;
 
       if (playing.length === 0 && waiting.length === 0) {
@@ -3428,7 +3629,9 @@ async function showAdminMonitor() {
       }
 
       // Топ-10 игроков
-      html += `<div style="font-weight:bold;margin:16px 0 6px;">👥 Игроки (топ-${Math.min(10, users.length)})</div>`;
+      </div>
+      <div style="font-weight:bold;margin:16px 0 6px;">👥 Игроки (топ-${Math.min(10, users.length)})</div>
+      <div style="max-height:160px;overflow-y:auto;">
       if (!users.length) {
         html += '<div style="color:var(--text-dim);font-size:0.85rem">Пока нет зарегистрированных</div>';
       } else {
@@ -3457,7 +3660,8 @@ async function showAdminMonitor() {
       }
 
       // Список онлайн-пользователей
-      html += `<div style="font-weight:bold;margin:16px 0 6px;">🟢 Онлайн сейчас (${onlineUsers.length})</div>`;
+      </div>
+      <div style="font-weight:bold;margin:16px 0 6px;">🟢 Онлайн сейчас (${onlineUsers.length})</div>
       if (onlineUsers.length === 0) {
         html += '<div style="color:var(--text-dim);font-size:0.85rem">Никого нет онлайн</div>';
       } else {
@@ -3610,6 +3814,151 @@ async function updateUserRating(uid, name, delta) {
   });
 }
 
+// ─── Раздел «Обратная связь» в админке ───
+async function showAdminFeedback() {
+  const section = document.getElementById('adminSection');
+  const actionsDiv = document.getElementById('adminActions');
+  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
+  actionsDiv.innerHTML = '';
+
+  try {
+    const r = await fetch(`${_SB_REST}/feedback?select=*&order=created_at.desc&limit=100`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+    const data = await r.json();
+    if (!Array.isArray(data) || !data.length) {
+      section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Сообщений пока нет</div>';
+    } else {
+      let html = '<div style="max-height:400px;overflow-y:auto;">';
+      data.forEach((fb, i) => {
+        const date = fb.created_at ? new Date(fb.created_at).toLocaleString('ru-RU') : '';
+        const typeLabel = {bug:'🐛 Баг', idea:'💡 Идея', other:'📝 Другое'}[fb.type] || fb.type;
+        const typeColor = {bug:'var(--warn)', idea:'var(--good)', other:'var(--accent)'}[fb.type] || 'var(--text-dim)';
+        const unread = !fb.read;
+        html += `<div style="background:var(--bg-soft);padding:10px;border-radius:6px;margin-bottom:8px;${unread ? 'border-left:3px solid var(--accent);' : ''}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <span style="font-size:0.8rem;font-weight:bold;color:${typeColor}">${typeLabel}</span>
+            <span style="color:var(--text-dim);font-size:0.7rem">${date}</span>
+          </div>
+          <div style="font-size:0.85rem;color:var(--text);margin-bottom:4px;">
+            <b>${escapeHtml(fb.name || 'Аноним')}</b>
+            ${fb.email ? `<span style="color:var(--text-dim);font-size:0.75rem"> · ${escapeHtml(fb.email)}</span>` : ''}
+          </div>
+          <div style="font-size:0.85rem;color:var(--text);line-height:1.4;white-space:pre-wrap;word-break:break-word;">${escapeHtml(fb.message || '')}</div>
+          <div style="margin-top:6px;display:flex;gap:6px;">
+            <button class="btn ghost admin-fb-read" data-id="${fb.id}" data-read="${fb.read ? '1' : '0'}" style="flex:0;padding:3px 8px;font-size:0.7rem">${fb.read ? '↩ Не прочитано' : '✓ Прочитано'}</button>
+            <button class="btn ghost admin-fb-del" data-id="${fb.id}" style="flex:0;padding:3px 8px;font-size:0.7rem;color:var(--warn)">🗑 Удалить</button>
+          </div>
+        </div>`;
+      });
+      html += '</div>';
+      const unreadCount = data.filter(f => !f.read).length;
+      html = `<div style="font-size:0.85rem;margin-bottom:8px;color:var(--text-dim)">Всего: ${data.length}${unreadCount > 0 ? ` · <span style="color:var(--accent)">не прочитано: ${unreadCount}</span>` : ''}</div>` + html;
+      section.innerHTML = html;
+
+      section.querySelectorAll('.admin-fb-read').forEach(b => b.addEventListener('click', async () => {
+        const id = b.dataset.id;
+        const newRead = b.dataset.read === '1' ? false : true;
+        await fetch(`${_SB_REST}/feedback?id=eq.${id}`, { method: 'PATCH', headers: _SB_HDR, mode: 'cors', body: JSON.stringify({ read: newRead }) });
+        showAdminFeedback();
+      }));
+      section.querySelectorAll('.admin-fb-del').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Удалить сообщение?')) return;
+        await fetch(`${_SB_REST}/feedback?id=eq.${b.dataset.id}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
+        showAdminFeedback();
+      }));
+    }
+  } catch(e) {
+    section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
+  }
+
+  // Кнопка обновить
+  const refreshBtn = document.createElement('button');
+  refreshBtn.className = 'btn ghost';
+  refreshBtn.style.width = '100%';
+  refreshBtn.style.textAlign = 'left';
+  refreshBtn.textContent = '🔄 Обновить';
+  refreshBtn.addEventListener('click', showAdminFeedback);
+  actionsDiv.appendChild(refreshBtn);
+}
+
+// ─── Модалка «Сообщить о баге/идее» для пользователей ───
+function showFeedbackModal() {
+  const user = window.FB?.getCurrentUser();
+  const myName = window.FB?.getMyName() || '';
+  const myEmail = user?.email || '';
+  const modal = $('modalContent');
+  modal.innerHTML = `
+    <div class="duel-modal-step">
+      <h2>📨 Обратная связь</h2>
+      <div class="modal-sub">Нашёл баг или есть идея? Расскажи!</div>
+      <div style="display:flex;gap:8px;margin:12px 0;">
+        <button class="btn feedback-type-btn" data-type="bug" style="flex:1">🐛 Баг</button>
+        <button class="btn feedback-type-btn" data-type="idea" style="flex:1">💡 Идея</button>
+        <button class="btn feedback-type-btn" data-type="other" style="flex:1">📝 Другое</button>
+      </div>
+      <div class="cloud-fields">
+        <label>Имя (необязательно)</label>
+        <input type="text" id="fbName" maxlength="30" value="${escapeHtml(myName)}" placeholder="Как тебя зовут?">
+      </div>
+      <div class="cloud-fields">
+        <label>Email (необязательно, чтобы ответить)</label>
+        <input type="email" id="fbEmail" maxlength="60" value="${escapeHtml(myEmail)}" placeholder="email@example.com">
+      </div>
+      <div class="cloud-fields">
+        <label>Сообщение *</label>
+        <textarea id="fbMessage" maxlength="2000" rows="5" placeholder="Расскажи подробнее..." style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--accent);background:var(--bg-soft);color:var(--text);font-family:inherit;font-size:14px;resize:vertical;"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn primary" id="fbSubmitBtn" style="flex:1">📨 Отправить</button>
+        <button class="btn ghost" id="fbCancelBtn" style="flex:1">Отмена</button>
+      </div>
+    </div>
+  `;
+  showModal();
+  let selectedType = 'bug';
+  const updateTypeUI = () => {
+    modal.querySelectorAll('.feedback-type-btn').forEach(b => {
+      if (b.dataset.type === selectedType) b.classList.add('active');
+      else b.classList.remove('active');
+    });
+  };
+  updateTypeUI();
+  modal.querySelectorAll('.feedback-type-btn').forEach(b => b.addEventListener('click', () => {
+    selectedType = b.dataset.type;
+    updateTypeUI();
+  }));
+  $('fbCancelBtn').addEventListener('click', hideModal);
+  $('fbSubmitBtn').addEventListener('click', async () => {
+    const msg = ($('fbMessage').value || '').trim();
+    if (!msg) { alert('Напиши сообщение'); return; }
+    const btn = $('fbSubmitBtn');
+    btn.disabled = true; btn.textContent = '⏳...';
+    try {
+      const r = await fetch(`${_SB_REST}/feedback`, {
+        method: 'POST', headers: _SB_HDR, mode: 'cors',
+        body: JSON.stringify({
+          type: selectedType,
+          name: ($('fbName').value || '').trim() || null,
+          email: ($('fbEmail').value || '').trim() || null,
+          message: msg,
+          uid: user?.id || null,
+          read: false,
+          created_at: Date.now()
+        })
+      });
+      if (r.ok) {
+        alert('✅ Спасибо! Сообщение отправлено админу.');
+        hideModal();
+      } else {
+        alert('Ошибка: ' + r.status);
+        btn.disabled = false; btn.textContent = '📨 Отправить';
+      }
+    } catch(e) {
+      alert('Ошибка: ' + e.message);
+      btn.disabled = false; btn.textContent = '📨 Отправить';
+    }
+  });
+}
+
 // Утилиты
 function formatTime(sec) {
   const m = Math.floor(sec / 60);
@@ -3652,14 +4001,16 @@ $('showDuelRatingsBtn').addEventListener('click', async () => {
   if (!window.FB.isSignedIn()) { alert('Подождите...'); return; }
   await showDuelRatingsModal();
 });
-document.addEventListener('click', e => {
+$('showFeedbackBtn')?.addEventListener('click', () => showFeedbackModal());
+document.addEventListener('click', async e => {
   if (e.target && e.target.id === 'duelQuitBtn') {
     console.log('[SUDOKU] quit clicked');
     if (_duelEnded) return;
     const confirmed = confirm('Покинуть дуэль? Ты получишь -рейтинг.');
     if (confirmed && duelCode) {
       const status = duelPlayer === 'p1' ? 'p1_quit' : 'p2_quit';
-      window.FB.quitDuel(duelCode, status);
+      // Сначала СООБЩАЕМ оппоненту о выходе (await)
+      await window.FB.quitDuel(duelCode, status);
       hideModal();
       duelCleanup();
       // endDuelGame покажет модалку с результатами
