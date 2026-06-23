@@ -3629,9 +3629,8 @@ async function showAdminMonitor() {
       }
 
       // Топ-10 игроков
-      </div>
-      <div style="font-weight:bold;margin:16px 0 6px;">👥 Игроки (топ-${Math.min(10, users.length)})</div>
-      <div style="max-height:160px;overflow-y:auto;">
+      html += `<div style="font-weight:bold;margin:16px 0 6px;">👥 Игроки (топ-${Math.min(10, users.length)})</div>`;
+      html += '<div style="max-height:160px;overflow-y:auto;">';
       if (!users.length) {
         html += '<div style="color:var(--text-dim);font-size:0.85rem">Пока нет зарегистрированных</div>';
       } else {
@@ -3660,8 +3659,9 @@ async function showAdminMonitor() {
       }
 
       // Список онлайн-пользователей
-      </div>
-      <div style="font-weight:bold;margin:16px 0 6px;">🟢 Онлайн сейчас (${onlineUsers.length})</div>
+      html += '</div>';
+      html += `<div style="font-weight:bold;margin:16px 0 6px;">🟢 Онлайн сейчас (${onlineUsers.length})</div>`;
+      html += '<div style="max-height:160px;overflow-y:auto;">';
       if (onlineUsers.length === 0) {
         html += '<div style="color:var(--text-dim);font-size:0.85rem">Никого нет онлайн</div>';
       } else {
@@ -3675,6 +3675,7 @@ async function showAdminMonitor() {
         });
         html += '</div>';
       }
+      html += '</div>';
 
       html += `<div style="color:var(--text-dim);font-size:0.7rem;margin-top:8px;text-align:right">Обновлено: ${new Date().toLocaleTimeString('ru-RU')}</div>`;
       section.innerHTML = html;
