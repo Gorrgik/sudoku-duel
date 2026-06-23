@@ -1001,6 +1001,25 @@
     line-height: 1;
   }
 
+  /* Цифра внутри numpad */
+  .num-btn {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+  }
+  .num-digit { line-height: 1; }
+  .num-remaining {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    font-weight: 400;
+    line-height: 1;
+    margin-top: 1px;
+  }
+  .num-remaining.done { color: var(--good); font-weight: bold; }
+
   /* Кнопка карандаша */
   #pencilBtn.active {
     background: rgba(129,140,248,0.2);
@@ -2099,6 +2118,20 @@ function renderCellNotes(r, c) {
   cell.appendChild(notesEl);
 }
 
+// Заметки для дуэльной доски (та же сетка 3×3 цифр-кандидатов)
+function renderDuelNotesHTML(notes) {
+  let html = '<div class="cell-notes">';
+  for (let n = 1; n <= 9; n++) {
+    html += `<span>${notes.includes(n) ? n : ''}</span>`;
+  }
+  return html + '</div>';
+}
+
+// Получить DOM-элемент дуэльной клетки
+function getDuelCellEl(r, c) {
+  return $('duelBoard').children[r*9 + c];
+}
+
 function getCellEl(r, c) {
   return $('board').children[r*9 + c];
 }
@@ -2142,28 +2175,33 @@ function renderNumPad() {
   for (let n = 1; n <= 9; n++) {
     const btn = document.createElement('button');
     btn.className = 'num-btn';
-    btn.textContent = n;
-    // Показываем счётчик если игра активна
-    if (state && state.started) {
-      const done = digitCompleteCount(n);
-      btn.title = `Цифра ${n}: ${done}/9`;
-      if (done === 9) btn.dataset.complete = 'true';
-    }
+    btn.innerHTML = `<span class="num-digit">${n}</span><span class="num-remaining" id="numRemain${n}"></span>`;
+    btn.dataset.n = n;
+    // Обновляем счётчик "осталось"
+    updateNumRemaining(n, btn);
     btn.addEventListener('click', () => { playClick(); placeNumber(n); });
     pad.appendChild(btn);
   }
 }
 
-function updatePencilBtn() {
-  const btn = $('pencilBtn');
-  if (!btn) return;
-  if (state && state.pencilMode) {
-    btn.classList.add('active');
-    btn.textContent = '✏️ Карандаш вкл.';
-  } else {
-    btn.classList.remove('active');
-    btn.textContent = '✏️ Карандаш';
+// Показывает сколько цифр `n` ещё нужно поставить (в текущей активной игре)
+function updateNumRemaining(n, btn) {
+  const el = btn.querySelector('.num-remaining') || document.getElementById('numRemain' + n);
+  if (!el) return;
+  let placed = 0;
+  if (duelBoard && duelSolution) {
+    for (let r = 0; r < 9; r++)
+      for (let c = 0; c < 9; c++)
+        if (duelBoard[r][c] === n && duelSolution[r][c] === n) placed++;
+  } else if (state && state.started && state.solution) {
+    for (let r = 0; r < 9; r++)
+      for (let c = 0; c < 9; c++)
+        if (state.user[r][c] === n && state.user[r][c] === state.solution[r][c]) placed++;
   }
+  const remaining = 9 - placed;
+  el.textContent = remaining > 0 ? remaining : '✓';
+  if (remaining === 0) el.classList.add('done');
+  else el.classList.remove('done');
 }
 
 function placeNumber(n) {
@@ -3656,11 +3694,33 @@ $('quitBtn').addEventListener('click', () => {
 });
 $('hintBtn').addEventListener('click', showHint);
 $('pencilBtn').addEventListener('click', () => {
-  if (!state || !state.started) return;
-  state.pencilMode = !state.pencilMode;
-  updatePencilBtn();
-  playClick();
+  // Карандаш в обычном режиме
+  if (state && state.started) {
+    state.pencilMode = !state.pencilMode;
+    updatePencilBtn();
+    playClick();
+    return;
+  }
+  // Карандаш в дуэли
+  if (duelCode && duelBoard) {
+    duelPencilMode = !duelPencilMode;
+    updatePencilBtn();
+    playClick();
+  }
 });
+
+function updatePencilBtn() {
+  const btn = $('pencilBtn');
+  if (!btn) return;
+  const active = (state && state.pencilMode) || duelPencilMode;
+  if (active) {
+    btn.classList.add('active');
+    btn.textContent = '✏️ Карандаш вкл.';
+  } else {
+    btn.classList.remove('active');
+    btn.textContent = '✏️ Карандаш';
+  }
+}
 
 // Управление с клавиатуры
 document.addEventListener('keydown', e => {
@@ -3717,6 +3777,8 @@ let duelSolution = null;
 let duelSelected = null;
 let duelMyRating = 1000;
 let duelOppRating = 1000;
+let duelPencilMode = false;
+let duelNotes = null;        // 9×9 массив массивов кандидатов
 
 const HEART = '❤️';
 const HEART_EMPTY = '🖤';
@@ -3752,6 +3814,9 @@ function renderDuelBoard() {
   board.innerHTML = '';
   if (!duelPuzzle || !duelBoard) { console.log('[SUDOKU] renderDuelBoard: нет данных, пропуск'); return; }
   console.log('[SUDOKU] renderDuelBoard: fullBoard=', duelBoard.map(r=>r.join('')).join('|'), 'player=', duelPlayer);
+  // Инициализируем массив заметок под дуэль, если ещё нет
+  if (!duelNotes) duelNotes = Array.from({length:9}, () => Array.from({length:9}, () => []));
+  renderNumPad(); // обновить счётчики оставшихся цифр
   const isP1 = duelPlayer === 'p1';
   for (let r = 0; r < 9; r++) {
     for (let c = 0; c < 9; c++) {
@@ -3775,6 +3840,10 @@ function renderDuelBoard() {
           const isWrong = _duelFirstMoveDone && duelSolution && duelSolution[r][c] !== val;
           cell.classList.add(isWrong ? 'error' : 'user');
           cell.textContent = val;
+        } else if (duelNotes && duelNotes[r] && duelNotes[r][c] && duelNotes[r][c].length) {
+          // Кандидаты (заметки карандаша)
+          cell.classList.add('notes');
+          cell.innerHTML = renderDuelNotesHTML(duelNotes[r][c]);
         }
       }
 
@@ -3832,6 +3901,10 @@ function syncDuelBoardDOM() {
       if (val === 0) {
         cell.classList.remove('error', 'user');
         cell.textContent = '';
+        // Если есть заметки — отобразить их
+        if (duelNotes && duelNotes[r] && duelNotes[r][c] && duelNotes[r][c].length) {
+          cell.innerHTML = renderDuelNotesHTML(duelNotes[r][c]);
+        }
         continue;
       }
       // Свои ошибки — красным, свои верные — синим, чужие ходы — обычным синим
@@ -3855,6 +3928,11 @@ function syncDuelBoardDOM() {
     }
   }
   highlightDuelSelection();
+  // Обновить счётчики "осталось" в numpad дуэли
+  for (let nn = 1; nn <= 9; nn++) {
+    const b = document.querySelector(`#duelNumPad .num-btn[data-n="${nn}"]`);
+    if (b) updateDuelNumRemaining(nn, b);
+  }
 }
 
 function duelPlaceNumber(n) {
@@ -3864,13 +3942,39 @@ function duelPlaceNumber(n) {
   playClick();
 
   if (n === 0) {
-    // стереть (только свои ошибки)
+    // стереть (только свои ошибки + заметки)
     const fixed = duelPuzzle && duelPuzzle[r][c] !== 0;
-    if (!fixed && duelBoard[r][c] !== 0) {
-      duelBoard[r][c] = 0;
-      duelSelected = null;
-      renderDuelBoard();
+    if (!fixed) {
+      // стираем заметки
+      if (duelNotes && duelNotes[r] && duelNotes[r][c] && duelNotes[r][c].length) {
+        duelNotes[r][c] = [];
+        duelSelected = null;
+        renderDuelBoard();
+        renderNumPad();
+        return;
+      }
+      if (duelBoard[r][c] !== 0) {
+        duelBoard[r][c] = 0;
+        duelSelected = null;
+        renderDuelBoard();
+        renderNumPad();
+      }
     }
+    return;
+  }
+
+  // === РЕЖИМ КАРАНДАША В ДУЭЛИ ===
+  if (duelPencilMode && n >= 1 && n <= 9) {
+    const fixed = duelPuzzle && duelPuzzle[r][c] !== 0;
+    const filled = duelBoard[r][c] !== 0;
+    if (fixed || filled) return; // заметки только в пустых клетках
+    if (!duelNotes) duelNotes = Array.from({length:9}, () => Array.from({length:9}, () => []));
+    const notes = duelNotes[r][c];
+    const idx = notes.indexOf(n);
+    if (idx >= 0) notes.splice(idx, 1);
+    else notes.push(n);
+    renderDuelBoard();
+    renderNumPad();
     return;
   }
 
@@ -3883,19 +3987,29 @@ function duelPlaceNumber(n) {
     playWrong();
     // неверный ответ — всё равно отправляем и рисуем на доске
     duelBoard[r][c] = n;
+    // Чистим заметки — клетка теперь занята
+    if (duelNotes && duelNotes[r]) duelNotes[r][c] = [];
     window.FB.sendDuelMove(duelCode, r, c, n, false);
   } else {
     duelMyCorrect++;
     flashCorrect();
     playCorrect();
     duelBoard[r][c] = n;
+    // Чистим заметки — цифра поставлена
+    if (duelNotes && duelNotes[r]) duelNotes[r][c] = [];
     window.FB.sendDuelMove(duelCode, r, c, n, true);
   }
 
   duelSelected = null;
   renderDuelBoard();
+  renderNumPad();
+  // Обновить numpad дуэли (счётчики оставшихся)
+  for (let nn = 1; nn <= 9; nn++) {
+    const b = document.querySelector(`#duelNumPad .num-btn[data-n="${nn}"]`);
+    if (b) updateDuelNumRemaining(nn, b);
+  }
 
-  // Проверка:赢了 или потерял все жизни
+  // Проверка: победил или потерял все жизни
   if (duelMyLives <= 0) {
     duelMyLives = 0;
     window.FB.duelLose(duelCode);
@@ -4062,6 +4176,7 @@ function _applyDuelRoom(room) {
     renderDuelNumPad();
     startDuelTimer();
     updateDuelHUD(room);
+    updatePencilBtn(); // обновить кнопку карандаша (сбросить если была активна)
   } else {
     // Sync: обновляем lives и opponent's ходы в DOM без пересоздания доски
     duelMyCorrect = Number(isP1 ? (room.player1_correct || 0) : (room.player2_correct || 0));
@@ -4163,10 +4278,27 @@ function renderDuelNumPad() {
   for (let n = 1; n <= 9; n++) {
     const btn = document.createElement('button');
     btn.className = 'num-btn';
-    btn.textContent = n;
+    btn.innerHTML = `<span class="num-digit">${n}</span><span class="num-remaining" id="duelNumRemain${n}"></span>`;
+    btn.dataset.n = n;
+    updateDuelNumRemaining(n, btn);
     btn.addEventListener('click', () => { playClick(); duelPlaceNumber(n); });
     pad.appendChild(btn);
   }
+}
+
+function updateDuelNumRemaining(n, btn) {
+  const el = btn.querySelector('.num-remaining') || document.getElementById('duelNumRemain' + n);
+  if (!el) return;
+  let placed = 0;
+  if (duelBoard && duelSolution) {
+    for (let r = 0; r < 9; r++)
+      for (let c = 0; c < 9; c++)
+        if (duelBoard[r][c] === n && duelSolution[r][c] === n) placed++;
+  }
+  const remaining = 9 - placed;
+  el.textContent = remaining > 0 ? remaining : '✓';
+  if (remaining === 0) el.classList.add('done');
+  else el.classList.remove('done');
 }
 
 // Dukальный таймер для дуэли
