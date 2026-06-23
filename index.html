@@ -3185,10 +3185,10 @@ async function showAdminRatings() {
     // Загружаем рейтинги + баны параллельно. Только залогиненные (UUID содержит дефисы)
     const [ratingsR, bannedR] = await Promise.all([
       fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins&uid=like.*-*&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }),
-      fetch(`${_SB_REST}/banned_users?select=uid`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }).catch(() => ({ json: async () => [] }))
+      fetch(`${_SB_REST}/banned_users?select=uid`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }).catch(() => ({ ok: false, status: 0, json: async () => [] }))
     ]);
-    const data = await ratingsR.json();
-    const banned = Array.isArray(await bannedR.json?.() || []) ? await bannedR.json() : [];
+    const data = ratingsR.ok ? await ratingsR.json() : [];
+    const banned = bannedR.ok ? await bannedR.json() : [];
     const bannedSet = new Set(banned.map(b => b.uid));
 
     if (!Array.isArray(data) || !data.length) {
