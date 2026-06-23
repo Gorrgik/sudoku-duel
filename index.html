@@ -677,6 +677,7 @@
 
     upsertRating,
     getMyRating: () => sbOk ? Promise.resolve({ rating: myRating }) : Promise.resolve(null),
+    isBanned: () => isBanned(),
     getMyRatingSync: () => myRating, // синхронный доступ для UI
     getRtdbUrl: () => 'supabase',
 
@@ -1441,6 +1442,7 @@
   <div class="num-pad" id="numPad"></div>
 
   <div class="controls">
+    <button class="btn ghost" id="autoPlaceBtn" title="Авто-постановка: выбери цифру на нумпаде и кликай по клеткам">🎯 Авто</button>
     <button class="btn ghost" id="pencilBtn">✏️ Карандаш</button>
     <button class="btn ghost" id="hintBtn">💡 Подсказка</button>
     <button class="btn danger" id="quitBtn">✕ Выйти</button>
@@ -2201,6 +2203,17 @@ function getCellEl(r, c) {
 }
 
 function selectCell(r, c) {
+  // Если выбрана цифра на нумпаде — ставим её в клетку
+  if (selectedDigit !== null && autoPlaceMode) {
+    placeNumber(selectedDigit);
+    // Не снимаем выделение digit — можно ставить ту же цифру в несколько клеток подряд
+    return;
+  }
+  if (selectedDigit !== null && !autoPlaceMode) {
+    // Режим выключен — просто снимаем выделение цифры
+    clearDigitHighlight();
+    selectedDigit = null;
+  }
   const prev = selectedCell ? (selectedCell.r * 9 + selectedCell.c) : -1;
   selectedCell = { r, c };
   // При выборе клетки снимаем подсветку цифры (режим "найти все")
@@ -2373,6 +2386,8 @@ function placeNumber(n) {
 // Визуально полностью повторяет выделение при клике на клетку:
 // .highlight (строка/столбец/блок) + .same-num (все такие же цифры)
 let digitHighlightN = null;
+let selectedDigit = null;      // 1-9: цифра выбрана на нумпаде для авто-постановки
+let autoPlaceMode = false;     // включить/выключить режим авто-постановки
 
 function toggleDigitHighlight(n) {
   if (!state || !state.started) return;
@@ -2380,46 +2395,27 @@ function toggleDigitHighlight(n) {
   // Та же цифра — выключаем
   if (digitHighlightN === n) {
     clearDigitHighlight();
+    selectedDigit = null;
     return;
   }
 
   clearDigitHighlight();
   digitHighlightN = n;
+  selectedDigit = n; // для режима авто-постановки
 
-  // Сначала снимаем выделение клетки (чтобы не мешал)
+  // Снимаем выделение клетки (чтобы не мешало подсветке цифр)
   selectedCell = null;
-  document.querySelectorAll('.cell.selected, .cell.highlight, .cell.same-num')
-    .forEach(el => el.classList.remove('selected', 'highlight', 'same-num'));
+  document.querySelectorAll('.cell.selected')
+    .forEach(el => el.classList.remove('selected'));
 
-  // Находим ВСЕ клетки со значением n на ДОПОЛНЕННОЙ доске
-  // (puzzle + user), запоминаем их как "виртуально выбранные"
-  const matchedCells = [];
+  // Подсвечиваем ТОЛЬКО клетки с этой цифрой (без строк/столбцов)
   for (let r = 0; r < 9; r++) {
     for (let c = 0; c < 9; c++) {
       const boardVal = state.user[r][c] !== 0
         ? state.user[r][c]
         : state.puzzle[r][c];
       if (boardVal === n) {
-        matchedCells.push({ r, c });
-        getCellEl(r, c).classList.add('selected');
-      }
-    }
-  }
-
-  // Для каждой совпавшей клетки подсвечиваем её строку, столбец, блок
-  // и все другие клетки с числом n (они уже .selected)
-  for (const { r, c } of matchedCells) {
-    // Строка + столбец
-    for (let i = 0; i < 9; i++) {
-      getCellEl(r, i).classList.add('highlight');
-      getCellEl(i, c).classList.add('highlight');
-    }
-    // Блок 3x3
-    const br = Math.floor(r / 3) * 3;
-    const bc = Math.floor(c / 3) * 3;
-    for (let rr = br; rr < br + 3; rr++) {
-      for (let cc = bc; cc < bc + 3; cc++) {
-        getCellEl(rr, cc).classList.add('highlight');
+        getCellEl(r, c).classList.add('same-num');
       }
     }
   }
@@ -2427,15 +2423,16 @@ function toggleDigitHighlight(n) {
   // Подсвечиваем кнопку на num-pad
   const buttons = $('numPad').querySelectorAll('.num-btn');
   for (const btn of buttons) {
-    if (parseInt(btn.textContent, 10) === n) {
+    if (Number(btn.dataset.n) === n) {
       btn.classList.add('active');
     }
   }
 }
 
 function clearDigitHighlight() {
-  if (digitHighlightN === null) return;
+  if (digitHighlightN === null && selectedDigit === null) return;
   digitHighlightN = null;
+  selectedDigit = null;
   document.querySelectorAll('.cell.selected, .cell.highlight, .cell.same-num')
     .forEach(el => el.classList.remove('selected', 'highlight', 'same-num'));
   document.querySelectorAll('.num-btn.active')
@@ -4024,6 +4021,26 @@ document.addEventListener('click', async e => {
 
 // Переключатели темы и звука
 $('themeBtn')?.addEventListener('click', () => { toggleTheme(); playClick(); });
+
+// Клик ВНЕ доски/numPad/контролов = снять выделение
+document.addEventListener('click', (e) => {
+  if (!state || !state.started) return;
+  if (state.notes && state.notes.length) {} // no-op
+  const target = e.target;
+  const inBoard = target.closest && (target.closest('.cell') || target.closest('#numPad') || target.closest('.controls'));
+  const isNumBtn = target.closest && target.closest('.num-btn');
+  const isPencil = target.closest && (target.closest('#pencilBtn') || target.closest('#hintBtn') || target.closest('#quitBtn'));
+  // Клик на num-pad не сбрасывает выделение (там своя логика)
+  // Клик на клетку/контролы — не сбрасываем (там обрабатывается)
+  // Клик ВНЕ этих областей — сбрасываем выделение
+  if (!inBoard && !isNumBtn && !isPencil) {
+    if (selectedCell) {
+      selectedCell = null;
+      clearDigitHighlight();
+      highlightSelection();
+    }
+  }
+});
 $('soundBtn')?.addEventListener('click', () => {
   toggleSound();
   if (soundEnabled) playClick();
@@ -4055,6 +4072,18 @@ $('quitBtn').addEventListener('click', () => {
 $('hintBtn').addEventListener('click', showHint);
 $('pencilBtn').addEventListener('click', () => { togglePencilMode(); });
 $('duelPencilBtn')?.addEventListener('click', () => { togglePencilMode(); });
+
+// Авто-постановка: включить/выключить режим
+function toggleAutoPlace() {
+  autoPlaceMode = !autoPlaceMode;
+  const btn = $('autoPlaceBtn');
+  if (btn) {
+    if (autoPlaceMode) { btn.classList.add('active'); btn.textContent = '🎯 Авто вкл'; }
+    else { btn.classList.remove('active'); btn.textContent = '🎯 Авто'; }
+  }
+  playClick();
+}
+$('autoPlaceBtn')?.addEventListener('click', toggleAutoPlace);
 
 function togglePencilMode() {
   if (state && state.started) {
@@ -4745,6 +4774,7 @@ async function showDuelMenu() {
   $('duelCreateBtn').addEventListener('click', async () => {
     console.log('[SUDOKU] A: duelCreateBtn нажат');
     const name = ($('duelNameInput').value.trim() || 'Игрок').slice(0, 20);
+    if (await window.FB?.isBanned?.()) { alert('⛔ Вы заблокированы и не можете создавать дуэли.'); return; }
     window.FB.setMyName(name);
     hideModal();
     const { puzzle, solution } = generatePuzzle(30);
@@ -4760,6 +4790,7 @@ async function showDuelMenu() {
     const name = ($('duelNameInput').value.trim() || 'Игрок').slice(0, 20);
     const code = $('duelJoinInput').value.trim().toUpperCase();
     if (!code) { alert('Введи код комнаты!'); return; }
+    if (await window.FB?.isBanned?.()) { alert('⛔ Вы заблокированы и не можете присоединяться к дуэлям.'); return; }
     window.FB.setMyName(name);
     hideModal();
     const result = await window.FB.joinDuelRoom(code, name);
@@ -4778,6 +4809,13 @@ async function showDuelMenu() {
     btn.disabled = true;
     const origText = btn.textContent;
     btn.textContent = '⏳ Ищем соперника...';
+    // Проверка бана ДО показа модалки поиска
+    if (await window.FB?.isBanned?.()) {
+      btn.disabled = false;
+      btn.textContent = origText;
+      alert('⛔ Вы заблокированы и не можете участвовать в дуэлях.');
+      return;
+    }
     // Имя читаем ДО showMatchmakingModal (modalContent будет очищен)
     const nameInput = $('duelNameInput');
     const name = (nameInput ? nameInput.value.trim() : '' || 'Игрок').slice(0, 20);
