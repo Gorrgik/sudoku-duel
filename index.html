@@ -2908,7 +2908,7 @@ function updateAuthButton() {
     if (user) {
       const name = user.user_metadata?.name || user.email?.split('@')[0] || '?';
       btn.textContent = name.charAt(0).toUpperCase();
-      btn.title = `${name} — выйти`;
+      btn.title = `${name} (${user.email})`;
       btn.style.background = 'linear-gradient(135deg, #7c3aed, #db2777)';
       btn.style.color = '#fff';
       btn.style.fontWeight = '700';
@@ -3004,8 +3004,16 @@ function showAuthModal() {
     });
 
     $('authSignOutBtn')?.addEventListener('click', async () => {
-      await window.FB.signOut();
-      hideModal();
+      const user = window.FB?.getCurrentUser();
+      const name = user?.user_metadata?.name || user?.email || '?';
+      if (!confirm(`Выйти из аккаунта «${name}»?`)) return;
+      try {
+        await window.FB.signOut();
+        hideModal();
+        location.reload();
+      } catch (err) {
+        alert('Ошибка выхода: ' + err.message);
+      }
     });
     $('authModalCloseBtn')?.addEventListener('click', hideModal);
   } else {
@@ -3029,6 +3037,7 @@ function showAuthModal() {
       <div class="cloud-fields">
         <label>Email</label>
         <input type="email" id="authEmailInput" placeholder="pochta@mail.ru">
+        <div style="font-size:0.78rem;color:var(--text-dim);margin-top:4px;">⚠️ Используй тот же email, что и на ПК/телефоне — иначе будет другой аккаунт</div>
       </div>
       <div class="cloud-fields">
         <label>Пароль</label>
@@ -3097,10 +3106,7 @@ function showAuthModal() {
   }
 }
 
-// Auth button clicks (script at bottom of body — DOM already ready)
-document.querySelectorAll('.auth-btn').forEach(btn => {
-  btn.addEventListener('click', () => showAuthModal());
-});
+// Auth button clicks — обработчик добавлен ниже вместе с долгим нажатием (line ~4318)
 // Слушаем изменение auth состояния
 // =============== АДМИНКА ===========================
 // Глобальные константы для админки (продублированы из IIFE)
@@ -4312,35 +4318,7 @@ $('lvlVibBtn')?.addEventListener('click', () => { toggleVibration(); });
 
 // Долгое нажатие на 👤 = мгновенный logout (удобно на телефоне)
 document.querySelectorAll('.auth-btn').forEach(btn => {
-  let pressTimer = null;
-  let pressTriggered = false;
-  const startPress = (e) => {
-    pressTriggered = false;
-    pressTimer = setTimeout(() => {
-      pressTriggered = true;
-      const user = window.FB?.getCurrentUser();
-      if (user) {
-        if (confirm(`Выйти из аккаунта ${user.user_metadata?.name || user.email}?`)) {
-          window.FB.signOut().then(() => location.reload());
-        }
-      } else {
-        // Не залогинен — открываем модалку как обычно
-        showAuthModal();
-      }
-    }, 600);
-  };
-  const cancelPress = () => { if (pressTimer) clearTimeout(pressTimer); pressTimer = null; };
-  btn.addEventListener('mousedown', startPress);
-  btn.addEventListener('touchstart', startPress, { passive: true });
-  btn.addEventListener('mouseup', cancelPress);
-  btn.addEventListener('mouseleave', cancelPress);
-  btn.addEventListener('touchend', cancelPress);
-  btn.addEventListener('touchcancel', cancelPress);
-  btn.addEventListener('click', (e) => {
-    if (pressTriggered) { e.preventDefault(); e.stopPropagation(); pressTriggered = false; return; }
-    // Короткий клик — открыть модалку
-    showAuthModal();
-  });
+  btn.addEventListener('click', () => showAuthModal());
 });
 
 // Перенесём themeBtn и soundBtn в список sound-btn/theme-btn для обновления иконок
