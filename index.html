@@ -1944,13 +1944,14 @@ async function loadRecordsFromCloud() {
 let audioCtx = null;
 let soundEnabled = localStorage.getItem('sudoku_sound') !== 'off';
 let vibrationEnabled = localStorage.getItem('sudoku_vibration') !== 'off';
+const vibrationSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
 const soundBtnEmoji = () => soundEnabled ? '🔊' : '🔇';
 const vibBtnEmoji = () => vibrationEnabled ? '📳' : '📴';
 
 // Краткая вибрация (отдельная от звука)
 function vibe(pattern) {
   if (!vibrationEnabled) return;
-  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+  if (!vibrationSupported) return;
   try { navigator.vibrate(pattern); } catch (e) {}
 }
 
@@ -2323,12 +2324,31 @@ function renderNumPad() {
         }
         btn.classList.add('active');
       }
-      // Если выключен авто-режим и есть выбранная клетка — ставим цифру
+      // Если выключен авто-режим и есть выбранная клетка — ставим цифру и сбрасываем подсветку numpad
       if (!autoPlaceMode && selectedCell) {
         placeNumber(n);
+        // Цифра использована — сбрасываем выделение на numpad и подсветку на доске
+        clearDigitHighlight();
       }
     });
     pad.appendChild(btn);
+  }
+  // В авто-режиме сохраняем подсветку выбранной цифры после пересоздания кнопок
+  if (autoPlaceMode && selectedDigit !== null) {
+    const activeBtn = pad.querySelector(`.num-btn[data-n="${selectedDigit}"]`);
+    if (activeBtn) activeBtn.classList.add('active');
+    // Восстанавливаем same-num подсветку на доске
+    document.querySelectorAll('.cell.same-num').forEach(el => el.classList.remove('same-num'));
+    if (state && state.started) {
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          const boardVal = state.user[r][c] !== 0 ? state.user[r][c] : state.puzzle[r][c];
+          if (boardVal === selectedDigit) {
+            getCellEl(r, c)?.classList.add('same-num');
+          }
+        }
+      }
+    }
   }
 }
 
@@ -4347,6 +4367,10 @@ document.querySelectorAll('.auth-btn').forEach(btn => {
   document.querySelectorAll('.vib-btn').forEach(el => {
     if (el) el.textContent = vibBtnEmoji();
   });
+  // Скрыть кнопку вибрации на устройствах без поддержки navigator.vibrate (десктоп, iOS Safari)
+  if (!vibrationSupported) {
+    document.querySelectorAll('.vib-btn').forEach(el => { if (el) el.style.display = 'none'; });
+  }
 })();
 $('quitBtn').addEventListener('click', () => {
   if (confirm('Выйти в меню? Прогресс сохранится.')) {
