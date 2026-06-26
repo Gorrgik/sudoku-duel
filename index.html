@@ -2829,17 +2829,15 @@ function renderRecordsList(records, cloudOk = false) {
   `;
   showModal();
   $('recCloseBtn').addEventListener('click', hideModal);
-  // Обработчики под-вкладок
-  modal.querySelectorAll('[data-lvl]').forEach(b => b.addEventListener('click', () => {
-    currentLevel = b.dataset.lvl;
-    modal.querySelector('#recTabs').innerHTML = renderTabs();
+  // Обработчики под-вкладок — делегируем через #recTabs (один обработчик на всё)
+  const recTabsEl = modal.querySelector('#recTabs');
+  recTabsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-lvl]');
+    if (!btn) return;
+    currentLevel = btn.dataset.lvl;
+    recTabsEl.innerHTML = renderTabs();
     modal.querySelector('#recRows').innerHTML = renderRows();
-    modal.querySelectorAll('[data-lvl]').forEach(bb => bb.addEventListener('click', () => {
-      currentLevel = bb.dataset.lvl;
-      modal.querySelector('#recTabs').innerHTML = renderTabs();
-      modal.querySelector('#recRows').innerHTML = renderRows();
-    }));
-  }));
+  });
 }
 
 function escapeHtml(s) {
@@ -3212,15 +3210,18 @@ async function showAdminRecords() {
       listEl.innerHTML = html;
     };
     renderInto();
-    // Обработчики табов
-    section.querySelectorAll('[data-lvl]').forEach(b => b.addEventListener('click', () => {
-      currentLevel = b.dataset.lvl;
+    // Обработчик табов через делегирование (один раз на родительский элемент)
+    section.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-lvl]');
+      if (!btn) return;
+      currentLevel = btn.dataset.lvl;
+      // Просто обновляем классы существующих кнопок
       section.querySelectorAll('[data-lvl]').forEach(bb => {
         if (bb.dataset.lvl === currentLevel) { bb.classList.add('primary'); bb.classList.remove('ghost'); }
         else { bb.classList.remove('primary'); bb.classList.add('ghost'); }
       });
       renderInto();
-    }));
+    });
   } catch(e) {
     section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
   }
