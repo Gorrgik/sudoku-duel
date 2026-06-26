@@ -2778,33 +2778,68 @@ async function showRecordsModal() {
 
 function renderRecordsList(records, cloudOk = false) {
   const modal = $('modalContent');
-  const myUid = window.FB?.getMyUid() || localStorage.getItem('sudoku_uid');
-  const isLoggedIn = window.FB?.isSignedIn();
-  const rows = records.length === 0
-    ? `<div class="empty-state">Пока нет рекордов.<br>Сыграй партию и оставь свой след!</div>`
-    : records.map((r, i) => {
-        const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
-        const isMe = isLoggedIn && r.uid && r.uid === myUid;
-        const authBadge = isMe ? ' ✓' : (!isLoggedIn && r.uid ? '👤' : (!isLoggedIn ? '' : '👤'));
-        return `
-          <div class="record-row ${rankClass} ${isMe ? 'me-row' : ''}">
-            <div class="rank">#${i+1}</div>
-            <div class="name">${escapeHtml(r.name)}${authBadge}</div>
-            <div class="time">${formatTime(r.seconds)}</div>
-            <div class="lvl-tag ${r.level}">${LEVELS[r.level]?.label || r.level}</div>
-          </div>`;
-      }).join('');
+  // Под-вкладки по сложности
+  const levels = [
+    { id: 'all', label: '🌐 Все' },
+    { id: 'easy', label: '🟢 Лёгкий' },
+    { id: 'medium', label: '🟡 Средний' },
+    { id: 'hard', label: '🔴 Сложный' },
+  ];
+  let currentLevel = 'all';
+
+  const renderRows = () => {
+    const filtered = currentLevel === 'all' ? records : records.filter(r => r.level === currentLevel);
+    const myUid = window.FB?.getMyUid() || localStorage.getItem('sudoku_uid');
+    const isLoggedIn = window.FB?.isSignedIn();
+    return filtered.length === 0
+      ? `<div class="empty-state">Нет рекордов${currentLevel === 'all' ? '' : ' для этого уровня'}.<br>Сыграй партию!</div>`
+      : filtered.map((r, i) => {
+          const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+          const isMe = isLoggedIn && r.uid && r.uid === myUid;
+          const authBadge = isMe ? ' ✓' : (!isLoggedIn && r.uid ? '👤' : (!isLoggedIn ? '' : '👤'));
+          return `
+            <div class="record-row ${rankClass} ${isMe ? 'me-row' : ''}">
+              <div class="rank">#${i+1}</div>
+              <div class="name">${escapeHtml(r.name)}${authBadge}</div>
+              <div class="time">${formatTime(r.seconds)}</div>
+              <div class="lvl-tag ${r.level}">${LEVELS[r.level]?.label || r.level}</div>
+            </div>`;
+        }).join('');
+  };
+
+  const renderTabs = () => {
+    let html = '<div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap;">';
+    levels.forEach(l => {
+      const active = l.id === currentLevel;
+      const count = l.id === 'all' ? records.length : records.filter(r => r.level === l.id).length;
+      html += `<button class="btn ${active ? 'primary' : 'ghost'}" data-lvl="${l.id}" style="flex:1;min-width:80px;padding:6px 10px;font-size:0.85rem">${l.label} <span style="opacity:0.6;font-size:0.75rem">(${count})</span></button>`;
+    });
+    html += '</div>';
+    return html;
+  };
 
   modal.innerHTML = `
     <h2>🏆 Таблица рекордов</h2>
-    <div class="modal-sub">Топ-${records.length} лучших результатов по времени</div>
-    <div class="records-list">${rows}</div>
+    <div class="modal-sub">Топ результаты по времени</div>
+    <div id="recTabs">${renderTabs()}</div>
+    <div class="records-list" id="recRows">${renderRows()}</div>
     <div class="modal-actions">
       <button class="btn primary" id="recCloseBtn">Закрыть</button>
     </div>
   `;
   showModal();
   $('recCloseBtn').addEventListener('click', hideModal);
+  // Обработчики под-вкладок
+  modal.querySelectorAll('[data-lvl]').forEach(b => b.addEventListener('click', () => {
+    currentLevel = b.dataset.lvl;
+    modal.querySelector('#recTabs').innerHTML = renderTabs();
+    modal.querySelector('#recRows').innerHTML = renderRows();
+    modal.querySelectorAll('[data-lvl]').forEach(bb => bb.addEventListener('click', () => {
+      currentLevel = bb.dataset.lvl;
+      modal.querySelector('#recTabs').innerHTML = renderTabs();
+      modal.querySelector('#recRows').innerHTML = renderRows();
+    }));
+  }));
 }
 
 function escapeHtml(s) {
@@ -3100,18 +3135,69 @@ let _adminRefreshTimer = null;
 async function showAdminRecords() {
   const section = document.getElementById('adminSection');
   const actionsDiv = document.getElementById('adminActions');
+  let currentLevel = 'all';
+  const levels = [
+    { id: 'all', label: '🌐 Все' },
+    { id: 'easy', label: '🟢 Лёгкий' },
+    { id: 'medium', label: '🟡 Средний' },
+    { id: 'hard', label: '🔴 Сложный' },
+  ];
+  let allData = [];
+
+  const renderList = () => {
+    const filtered = currentLevel === 'all' ? allData : allData.filter(r => r.level === currentLevel);
+    if (!filtered.length) {
+      section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рекордов нет</div>';
+      return;
+    }
+    let html = '<div style="max-height:280px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;">';
+    html += '<div style="display:grid;grid-template-columns:24px 30px 1fr 70px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span></span><span>#</span><span>Имя</span><span>Время</span><span>Сложн.</span></div>';
+    filtered.forEach((r, i) => {
+      const t = formatTime(r.seconds || 0);
+      html += `<div style="display:grid;grid-template-columns:24px 30px 1fr 70px 60px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
+        <input type="checkbox" class="admin-rec-chk" data-id="${escapeHtml(r.id)}" style="width:14px;height:14px;">
+        <span style="color:var(--text-dim)">${i+1}</span>
+        <span>${escapeHtml(r.name || '—')}</span>
+        <span>${t}</span>
+        <span style="color:var(--text-dim)">${r.level || '—'}</span>
+      </div>`;
+    });
+    html += '</div>';
+    html += `<div style="color:var(--text-dim);font-size:0.7rem;margin-top:4px;text-align:right">показано ${filtered.length}</div>`;
+    section.innerHTML = html;
+  };
+
+  const renderTabs = () => {
+    let html = '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">';
+    levels.forEach(l => {
+      const active = l.id === currentLevel;
+      const count = l.id === 'all' ? allData.length : allData.filter(r => r.level === l.id).length;
+      html += `<button class="btn ${active ? 'primary' : 'ghost'}" data-lvl="${l.id}" style="flex:1;min-width:80px;padding:6px 10px;font-size:0.8rem">${l.label} <span style="opacity:0.6;font-size:0.7rem">(${count})</span></button>`;
+    });
+    html += '</div>';
+    return html;
+  };
+
   section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
   actionsDiv.innerHTML = '';
 
   try {
-    const r = await fetch(`${_SB_REST}/single_records?select=*&order=seconds.asc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors', cache: 'no-store' });
-    const data = await r.json();
-    if (!Array.isArray(data) || !data.length) {
-      section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рекордов нет</div>';
-    } else {
-      let html = '<div style="max-height:300px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;">';
+    const r = await fetch(`${_SB_REST}/single_records?select=*&order=seconds.asc&limit=500`, { method: 'GET', headers: _SB_HDR, mode: 'cors', cache: 'no-store' });
+    allData = await r.json();
+    if (!Array.isArray(allData)) allData = [];
+    // Показываем под-вкладки
+    section.innerHTML = renderTabs() + '<div id="adminRecList"></div>';
+    document.querySelector('#adminRecList').innerHTML = '';
+    const renderInto = () => {
+      const listEl = document.querySelector('#adminRecList');
+      const filtered = currentLevel === 'all' ? allData : allData.filter(r => r.level === currentLevel);
+      if (!filtered.length) {
+        listEl.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рекордов нет</div>';
+        return;
+      }
+      let html = '<div style="max-height:280px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;">';
       html += '<div style="display:grid;grid-template-columns:24px 30px 1fr 70px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span></span><span>#</span><span>Имя</span><span>Время</span><span>Сложн.</span></div>';
-      data.forEach((r, i) => {
+      filtered.forEach((r, i) => {
         const t = formatTime(r.seconds || 0);
         html += `<div style="display:grid;grid-template-columns:24px 30px 1fr 70px 60px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
           <input type="checkbox" class="admin-rec-chk" data-id="${escapeHtml(r.id)}" style="width:14px;height:14px;">
@@ -3122,9 +3208,19 @@ async function showAdminRecords() {
         </div>`;
       });
       html += '</div>';
-      html += `<div style="color:var(--text-dim);font-size:0.7rem;margin-top:4px;text-align:right">показано ${data.length}</div>`;
-      section.innerHTML = html;
-    }
+      html += `<div style="color:var(--text-dim);font-size:0.7rem;margin-top:4px;text-align:right">показано ${filtered.length}</div>`;
+      listEl.innerHTML = html;
+    };
+    renderInto();
+    // Обработчики табов
+    section.querySelectorAll('[data-lvl]').forEach(b => b.addEventListener('click', () => {
+      currentLevel = b.dataset.lvl;
+      section.querySelectorAll('[data-lvl]').forEach(bb => {
+        if (bb.dataset.lvl === currentLevel) { bb.classList.add('primary'); bb.classList.remove('ghost'); }
+        else { bb.classList.remove('primary'); bb.classList.add('ghost'); }
+      });
+      renderInto();
+    }));
   } catch(e) {
     section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
   }
