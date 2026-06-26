@@ -1371,6 +1371,7 @@
       <button class="btn icon-btn" id="adminBtn" title="Админка" style="display:none" onclick="showAdminPanel()">⚙️</button>
       <button class="btn icon-btn" id="lvlThemeBtn" title="Сменить тему">🌙</button>
       <button class="btn icon-btn" id="lvlSoundBtn" title="Звук вкл/выкл">🔊</button>
+      <button class="btn icon-btn vib-btn" id="lvlVibBtn" title="Вибрация вкл/выкл">📳</button>
     </div>
   </div>
   <h2>Выбери уровень сложности</h2>
@@ -1932,7 +1933,16 @@ async function loadRecordsFromCloud() {
 
 let audioCtx = null;
 let soundEnabled = localStorage.getItem('sudoku_sound') !== 'off';
+let vibrationEnabled = localStorage.getItem('sudoku_vibration') !== 'off';
 const soundBtnEmoji = () => soundEnabled ? '🔊' : '🔇';
+const vibBtnEmoji = () => vibrationEnabled ? '📳' : '📴';
+
+// Краткая вибрация (отдельная от звука)
+function vibe(pattern) {
+  if (!vibrationEnabled) return;
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+  try { navigator.vibrate(pattern); } catch (e) {}
+}
 
 function getAudioCtx() {
   if (!audioCtx) {
@@ -1977,9 +1987,9 @@ function playClick() {
 }
 
 function playCorrect() {
+  // Вибро — независимо от звука, ощутимый двойной
+  vibe([30, 30, 30]);
   if (!soundEnabled) return;
-  // Виброотклик на мобильном: короткий приятный
-  try { navigator.vibrate?.(20); } catch (e) {}
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') ctx.resume();
@@ -1991,9 +2001,9 @@ function playCorrect() {
 }
 
 function playWrong() {
+  // Вибро — жёсткий тройной
+  vibe([80, 50, 80, 50, 80]);
   if (!soundEnabled) return;
-  // Виброотклик на мобильном: жёсткий двойной
-  try { navigator.vibrate?.([40, 60, 40]); } catch (e) {}
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') ctx.resume();
@@ -2004,9 +2014,9 @@ function playWrong() {
 }
 
 function playWin() {
+  // Вибро — победный фейерверк (усиленный)
+  vibe([100, 50, 100, 50, 100, 80, 300]);
   if (!soundEnabled) return;
-  // Виброотклик при победе: победный паттерн — три коротких + длинный
-  try { navigator.vibrate?.([60, 40, 60, 40, 60, 80, 200]); } catch (e) {}
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') ctx.resume();
@@ -3025,6 +3035,9 @@ function showAuthModal() {
         <input type="password" id="authPasswordInput" placeholder="••••••">
       </div>
       <button class="btn primary" id="authEmailBtn" style="width:100%;margin-bottom:8px;">Войти</button>
+      <div style="text-align:center;margin-bottom:8px;">
+        <a href="#" id="authForgotBtn" style="color:var(--accent);font-size:13px;text-decoration:underline;">Забыл пароль?</a>
+      </div>
       <button class="btn ghost" id="authSignupBtn" style="width:100%;margin-bottom:12px;">Регистрация</button>
       <button class="btn ghost" id="authModalCloseBtn" style="width:100%">Отмена</button>
     `;
@@ -3046,8 +3059,22 @@ function showAuthModal() {
       const { error } = await window.FB.signInWithEmail(email, password);
       $('authEmailBtn').disabled = false;
       $('authEmailBtn').textContent = 'Войти';
-      if (error) alert('Ошибка входа: ' + error.message);
+      if (error) {
+        let msg = error.message;
+        if (/Invalid login credentials/i.test(msg)) msg = 'Неверный email или пароль. Если регистрировался через Google — войди через кнопку Google выше.';
+        else if (/Email not confirmed/i.test(msg)) msg = 'Email не подтверждён. Проверь почту (включая спам).';
+        alert('Ошибка входа: ' + msg);
+      }
       else hideModal();
+    });
+
+    $('authForgotBtn')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const email = $('authEmailInput')?.value.trim();
+      if (!email) { alert('Сначала введи email в поле выше'); return; }
+      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      if (error) alert('Ошибка: ' + error.message);
+      else alert('📧 Письмо для сброса пароля отправлено на ' + email);
     });
 
     $('authSignupBtn')?.addEventListener('click', async () => {
@@ -4271,6 +4298,51 @@ $('lvlSoundBtn')?.addEventListener('click', () => {
   if (soundEnabled) playClick();
 });
 
+// Toggle вибрации
+function toggleVibration() {
+  vibrationEnabled = !vibrationEnabled;
+  localStorage.setItem('sudoku_vibration', vibrationEnabled ? 'on' : 'off');
+  document.querySelectorAll('.vib-btn').forEach(el => {
+    if (el) el.textContent = vibBtnEmoji();
+  });
+  // Тестовая вибрация при включении
+  if (vibrationEnabled) vibe(50);
+}
+$('lvlVibBtn')?.addEventListener('click', () => { toggleVibration(); });
+
+// Долгое нажатие на 👤 = мгновенный logout (удобно на телефоне)
+document.querySelectorAll('.auth-btn').forEach(btn => {
+  let pressTimer = null;
+  let pressTriggered = false;
+  const startPress = (e) => {
+    pressTriggered = false;
+    pressTimer = setTimeout(() => {
+      pressTriggered = true;
+      const user = window.FB?.getCurrentUser();
+      if (user) {
+        if (confirm(`Выйти из аккаунта ${user.user_metadata?.name || user.email}?`)) {
+          window.FB.signOut().then(() => location.reload());
+        }
+      } else {
+        // Не залогинен — открываем модалку как обычно
+        showAuthModal();
+      }
+    }, 600);
+  };
+  const cancelPress = () => { if (pressTimer) clearTimeout(pressTimer); pressTimer = null; };
+  btn.addEventListener('mousedown', startPress);
+  btn.addEventListener('touchstart', startPress, { passive: true });
+  btn.addEventListener('mouseup', cancelPress);
+  btn.addEventListener('mouseleave', cancelPress);
+  btn.addEventListener('touchend', cancelPress);
+  btn.addEventListener('touchcancel', cancelPress);
+  btn.addEventListener('click', (e) => {
+    if (pressTriggered) { e.preventDefault(); e.stopPropagation(); pressTriggered = false; return; }
+    // Короткий клик — открыть модалку
+    showAuthModal();
+  });
+});
+
 // Перенесём themeBtn и soundBtn в список sound-btn/theme-btn для обновления иконок
 // Инициализация иконок при загрузке
 (function initButtonIcons() {
@@ -4281,6 +4353,10 @@ $('lvlSoundBtn')?.addEventListener('click', () => {
   // Применить текущую иконку звука
   document.querySelectorAll('.sound-btn').forEach(el => {
     if (el) el.textContent = soundBtnEmoji();
+  });
+  // Применить иконку вибрации
+  document.querySelectorAll('.vib-btn').forEach(el => {
+    if (el) el.textContent = vibBtnEmoji();
   });
 })();
 $('quitBtn').addEventListener('click', () => {
