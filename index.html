@@ -2855,7 +2855,17 @@ function showModal() {
   m.style.zIndex = '1000';
   m.style.display = 'flex';
 }
-function hideModal() { $('modal').classList.add('hidden'); }
+function hideModal() {
+  const m = $('modal');
+  if (!m) return;
+  m.classList.add('hidden');
+  // Дополнительно сбрасываем inline-стили которые админка ставит при открытии
+  m.style.removeProperty('display');
+  m.style.removeProperty('z-index');
+  // Очищаем содержимое модалки чтобы кнопки/обработчики не оставались
+  const content = $('modalContent');
+  if (content) content.innerHTML = '';
+}
 
 /* ============== EVENTS ============== */
 
@@ -4966,7 +4976,15 @@ async function showDuelMenu() {
   `;
   showModal();
 
-  $('duelMenuCloseBtn').addEventListener('click', () => { hideModal(); showLevelScreen(); });
+  $('duelMenuCloseBtn').addEventListener('click', () => {
+    // Полная очистка: модалка + дуэль-state + matchmaking (если был в очереди)
+    window.FB?.leaveQueue?.();
+    duelCode = null; duelBoard = null; duelPuzzle = null; duelSolution = null;
+    _duelApplied = false; _duelEnded = false;
+    window._mmInProgress = false;
+    forceHideModal();
+    showLevelScreen();
+  });
 
   $('duelCreateBtn').addEventListener('click', async () => {
     console.log('[SUDOKU] A: duelCreateBtn нажат');
