@@ -130,7 +130,17 @@
 
   async function signOut() {
     if (!supabase) return;
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {}
+    // Принудительно очищаем ВСЕ ключи Supabase из localStorage
+    // (иначе после повторного входа через Google OAuth ломается — PKCE state невалидный)
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('sb-') || k.includes('supabase') || k.includes('pkce'))) keys.push(k);
+    }
+    keys.forEach(k => localStorage.removeItem(k));
   }
 
   function getAuthStatus() {
@@ -3010,7 +3020,8 @@ function showAuthModal() {
       try {
         await window.FB.signOut();
         hideModal();
-        location.reload();
+        // Жёсткая перезагрузка с очисткой кэша — иначе Supabase OAuth ломается при повторном входе
+        location.replace(location.href.split('?')[0] + '?t=' + Date.now());
       } catch (err) {
         alert('Ошибка выхода: ' + err.message);
       }
