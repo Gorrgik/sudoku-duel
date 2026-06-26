@@ -1978,6 +1978,8 @@ function playClick() {
 
 function playCorrect() {
   if (!soundEnabled) return;
+  // Виброотклик на мобильном: короткий приятный
+  try { navigator.vibrate?.(20); } catch (e) {}
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') ctx.resume();
@@ -1990,6 +1992,8 @@ function playCorrect() {
 
 function playWrong() {
   if (!soundEnabled) return;
+  // Виброотклик на мобильном: жёсткий двойной
+  try { navigator.vibrate?.([40, 60, 40]); } catch (e) {}
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') ctx.resume();
@@ -2001,6 +2005,8 @@ function playWrong() {
 
 function playWin() {
   if (!soundEnabled) return;
+  // Виброотклик при победе: победный паттерн — три коротких + длинный
+  try { navigator.vibrate?.([60, 40, 60, 40, 60, 80, 200]); } catch (e) {}
   const ctx = getAudioCtx();
   if (!ctx) return;
   if (ctx.state === 'suspended') ctx.resume();
