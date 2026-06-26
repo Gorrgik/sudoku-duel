@@ -2111,8 +2111,15 @@ function showLevelScreen() {
   $('levelScreen').classList.remove('hidden');
   $('gameScreen').classList.add('hidden');
 
+  // Не показываем "Продолжить" если state устарел (>2ч) или игрок только что вернулся из дуэли
   const saved = loadState();
-  $('resumeBtn').style.display = saved ? 'inline-flex' : 'none';
+  let showResume = !!saved;
+  if (saved && saved.startedAt && (Date.now() - saved.startedAt > 2 * 60 * 60 * 1000)) {
+    // Старше 2 часов — очищаем и не показываем
+    clearState();
+    showResume = false;
+  }
+  $('resumeBtn').style.display = showResume ? 'inline-flex' : 'none';
 }
 
 function showGameScreen() {
@@ -4977,11 +4984,14 @@ async function showDuelMenu() {
   showModal();
 
   $('duelMenuCloseBtn').addEventListener('click', () => {
-    // Полная очистка: модалка + дуэль-state + matchmaking (если был в очереди)
+    // Полная очистка: модалка + дуэль-state + matchmaking + обычная state
     window.FB?.leaveQueue?.();
     duelCode = null; duelBoard = null; duelPuzzle = null; duelSolution = null;
     _duelApplied = false; _duelEnded = false;
     window._mmInProgress = false;
+    // Очищаем сохранённую обычную игру — после дуэли её не продолжаем
+    try { localStorage.removeItem('sudoku_state_v3'); } catch (e) {}
+    state = null;
     forceHideModal();
     showLevelScreen();
   });
