@@ -1357,7 +1357,35 @@
 </head>
 <body>
 
-<h1>СУДОКУ</h1>
+<h1 style="display:flex;align-items:center;gap:10px;justify-content:center;">
+  <svg width="32" height="32" viewBox="0 0 36 36" style="flex-shrink:0;">
+    <!-- Фон -->
+    <rect x="1" y="1" width="34" height="34" rx="4" fill="var(--panel)" stroke="var(--accent)" stroke-width="1.5"/>
+    <!-- Тонкие линии сетки -->
+    <g stroke="var(--text-dim)" stroke-width="0.4" opacity="0.6">
+      <line x1="9" y1="2" x2="9" y2="34"/><line x1="17" y1="2" x2="17" y2="34"/><line x1="25" y1="2" x2="25" y2="34"/>
+      <line x1="2" y1="9" x2="34" y2="9"/><line x1="2" y1="17" x2="34" y2="17"/><line x1="2" y1="25" x2="34" y2="25"/>
+    </g>
+    <!-- Толстые линии 3x3 -->
+    <g stroke="var(--text)" stroke-width="1.2">
+      <line x1="13" y1="1" x2="13" y2="35"/><line x1="23" y1="1" x2="23" y2="35"/>
+      <line x1="1" y1="13" x2="35" y2="13"/><line x1="1" y1="23" x2="35" y2="23"/>
+    </g>
+    <!-- Цифры (пример подсказки) -->
+    <g font-family="ui-monospace, monospace" font-weight="bold" text-anchor="middle">
+      <text x="7" y="10" font-size="7" fill="var(--text)">5</text>
+      <text x="15" y="10" font-size="7" fill="var(--text-dim)">3</text>
+      <text x="23" y="10" font-size="7" fill="var(--text)">7</text>
+      <text x="7" y="18" font-size="7" fill="var(--accent)">9</text>
+      <text x="15" y="18" font-size="7" fill="var(--text-dim)">1</text>
+      <text x="23" y="18" font-size="7" fill="var(--text)">6</text>
+      <text x="7" y="26" font-size="7" fill="var(--text)">2</text>
+      <text x="15" y="26" font-size="7" fill="var(--good)">8</text>
+      <text x="23" y="26" font-size="7" fill="var(--text-dim)">4</text>
+    </g>
+  </svg>
+  <span>СУДОКУ</span>
+</h1>
 <div class="subtitle">Классика логики</div>
 
 <!-- Экран выбора уровня -->
