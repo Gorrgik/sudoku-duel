@@ -2219,9 +2219,23 @@ function selectCell(r, c) {
 }
 
 function highlightSelection() {
+  // Сохраняем .same-num (подсветка цифр при выбранной цифре в авто-режиме)
   document.querySelectorAll('.cell').forEach(el => {
-    el.classList.remove('selected', 'highlight', 'same-num');
+    el.classList.remove('selected', 'highlight');
   });
+  // Если выбрана цифра на нумпаде — восстанавливаем подсветку этой цифры
+  if (selectedDigit !== null) {
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        const boardVal = state?.user[r][c] !== 0
+          ? state.user[r][c]
+          : state.puzzle[r][c];
+        if (boardVal === selectedDigit) {
+          getCellEl(r, c)?.classList.add('same-num');
+        }
+      }
+    }
+  }
   if (!selectedCell) return;
   const { r, c } = selectedCell;
   const sel = getCellEl(r, c);
@@ -2628,17 +2642,7 @@ function showWinModal({ level, elapsed, errorCount, moves }) {
   `;
   showModal();
 
-  // АВТОСОХРАНЕНИЕ — рекорд записывается сразу при победе (имя по умолчанию)
-  const defaultName = getDefaultName() || window.FB?.getMyName() || 'Аноним';
-  saveRecord({
-    name: defaultName,
-    level: level,
-    seconds: elapsed,
-    errors: errorCount,
-    moves: moves,
-    date: new Date().toISOString()
-  }).catch(e => console.error('[SUDOKU] автосохранение рекорда:', e));
-
+  // Сохранение ТОЛЬКО по кнопке "Сохранить имя" — без автосохранения, чтобы не дублировать
   $('playerName').focus();
   $('playerName').addEventListener('keydown', e => {
     if (e.key === 'Enter') $('saveRecBtn').click();
