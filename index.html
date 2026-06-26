@@ -2303,9 +2303,10 @@ function renderNumPad() {
     updateNumRemaining(n, btn);
     btn.addEventListener('click', () => {
       playClick();
-      // Подсветка ВСЕГДА при клике на цифру (toggle: повторный клик снимает)
-      if (digitHighlightN === n && selectedDigit === n) {
-        // повторный клик той же цифры — снимаем выделение
+      // Подсветка при клике на цифру (toggle: повторный клик той же цифры снимает)
+      const wasAlreadyActive = (digitHighlightN === n && selectedDigit === n);
+      if (wasAlreadyActive && !selectedCell) {
+        // Повторный клик той же цифры БЕЗ выбранной клетки — toggle off
         clearDigitHighlight();
       } else {
         clearDigitHighlight();
@@ -2324,22 +2325,38 @@ function renderNumPad() {
         }
         btn.classList.add('active');
       }
-      // Если выключен авто-режим и есть выбранная клетка — ставим цифру и сбрасываем подсветку numpad
+      // Если выключен авто-режим и есть выбранная клетка — ставим цифру (подсветка остаётся)
       if (!autoPlaceMode && selectedCell) {
         placeNumber(n);
-        // Цифра использована — сбрасываем выделение на numpad и подсветку на доске
-        clearDigitHighlight();
+        // НЕ сбрасываем подсветку — только что поставленная цифра будет подсвечена
+        // Но обновим подсветку: если selectedCell теперь содержит ту же цифру — оставляем
+        // иначе — обновляем same-num под новую цифру
+        if (selectedDigit !== null) {
+          // снять старую same-num
+          document.querySelectorAll('.cell.same-num').forEach(el => el.classList.remove('same-num'));
+          // заново подсветить клетки с selectedDigit (=n)
+          if (state && state.started) {
+            for (let r = 0; r < 9; r++) {
+              for (let c = 0; c < 9; c++) {
+                const boardVal = state.user[r][c] !== 0 ? state.user[r][c] : state.puzzle[r][c];
+                if (boardVal === n) {
+                  getCellEl(r, c)?.classList.add('same-num');
+                }
+              }
+            }
+          }
+        }
       }
     });
     pad.appendChild(btn);
   }
-  // В авто-режиме сохраняем подсветку выбранной цифры после пересоздания кнопок
-  if (autoPlaceMode && selectedDigit !== null) {
+  // Сохраняем подсветку выбранной цифры после пересоздания кнопок (любой режим)
+  if (selectedDigit !== null) {
     const activeBtn = pad.querySelector(`.num-btn[data-n="${selectedDigit}"]`);
     if (activeBtn) activeBtn.classList.add('active');
-    // Восстанавливаем same-num подсветку на доске
-    document.querySelectorAll('.cell.same-num').forEach(el => el.classList.remove('same-num'));
-    if (state && state.started) {
+    // В авто-режиме дополнительно восстанавливаем same-num на доске
+    if (autoPlaceMode && state && state.started) {
+      document.querySelectorAll('.cell.same-num').forEach(el => el.classList.remove('same-num'));
       for (let r = 0; r < 9; r++) {
         for (let c = 0; c < 9; c++) {
           const boardVal = state.user[r][c] !== 0 ? state.user[r][c] : state.puzzle[r][c];
@@ -4309,16 +4326,17 @@ $('themeBtn')?.addEventListener('click', () => { toggleTheme(); playClick(); });
 // Клик ВНЕ доски/numPad/контролов = снять выделение
 document.addEventListener('click', (e) => {
   if (!state || !state.started) return;
-  if (state.notes && state.notes.length) {} // no-op
   const target = e.target;
-  const inBoard = target.closest && (target.closest('.cell') || target.closest('#numPad') || target.closest('.controls'));
-  const isNumBtn = target.closest && target.closest('.num-btn');
-  const isPencil = target.closest && (target.closest('#pencilBtn') || target.closest('#hintBtn') || target.closest('#quitBtn'));
-  // Клик на num-pad не сбрасывает выделение (там своя логика)
-  // Клик на клетку/контролы — не сбрасываем (там обрабатывается)
-  // Клик ВНЕ этих областей — сбрасываем выделение
-  if (!inBoard && !isNumBtn && !isPencil) {
-    if (selectedCell) {
+  if (!target || !target.closest) return;
+  // Сбрасываем выделение при клике в "пустоту" — вне активных элементов игры
+  const inActiveArea =
+    target.closest('.cell') ||
+    target.closest('#numPad') ||
+    target.closest('.controls') ||
+    target.closest('.topbar') ||
+    target.closest('.modal-content');
+  if (!inActiveArea) {
+    if (selectedCell || digitHighlightN !== null) {
       selectedCell = null;
       clearDigitHighlight();
       highlightSelection();
