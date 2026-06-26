@@ -3186,7 +3186,8 @@ async function showAdminRatings() {
     ]);
     const bannedSet = new Set(banned.map(b => b.uid));
     // Фильтруем забаненных из рейтинга
-    const visibleRatings = (data || []).filter(r => !bannedSet.has(r.uid));
+    // В админке показываем ВСЕХ (включая забаненных с 🚫) — чтобы админ мог управлять
+    const visibleRatings = data || [];
 
     if (!Array.isArray(visibleRatings) || !visibleRatings.length) {
       section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рейтингов нет</div>';
@@ -5016,10 +5017,18 @@ async function showDuelRatingsModal() {
   `;
   showModal();
 
-  const records = await window.FB.loadDuelRatings();
-  const rows = !records || records.length === 0
+  // Загружаем рейтинги и баны параллельно, скрываем забаненных из публичного рейтинга
+  const [records, banned] = await Promise.all([
+    window.FB.loadDuelRatings(),
+    fetch(`${_SB_REST}/banned_users?select=uid`, { method: 'GET', headers: _SB_HDR, mode: 'cors' })
+      .then(r => r.ok ? r.json() : []).catch(() => [])
+  ]);
+  const bannedSet = new Set(banned.map(b => b.uid));
+  const visible = (records || []).filter(r => !bannedSet.has(r.uid));
+
+  const rows = !visible || visible.length === 0
     ? `<div class="empty-state">Пока нет данных.<br>Сыграй дуэль!</div>`
-    : records.map((r, i) => {
+    : visible.map((r, i) => {
         const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
         const isMe = r.uid === window.FB.getMyUid();
         return `<div class="record-row ${rankClass} ${isMe ? 'me-row' : ''}">
