@@ -7,157 +7,39 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>Судоку</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function() {
-  // Supabase Auth
-  const SUPABASE_URL = 'https://iirydyaesqidmvpsmzfn.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g';
+  // Supabase REST API
+  const SB = 'https://iirydyaesqidmvpsmzfn.supabase.co/rest/v1';
+  const AK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g';
 
-  // Supabase Auth client
-  let supabase = null;
-  let currentUser = null; // { id, email, user_metadata: { name, avatar_url } }
-  let isAuthLoading = true;
-
-  // REST API helpers (for duel data)
-  const SB = SUPABASE_URL + '/rest/v1';
-  const HDR = { 'apikey': SUPABASE_ANON_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+  const HDR = { 'apikey': AK, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
 
   let sbOk = false, fbReady = false;
-  // UID — берём из Supabase Auth, fallback на анонимный
-  let myUid = localStorage.getItem('sudoku_uid');
+  let myUid = null;
   let myName = localStorage.getItem('sudoku_duel_name') || '';
   let myRating = 1000;
-  let matchRoomCode = null;
+  let matchRoomCode = null; // код комнаты текущего matchmaking
 
-  // Инициализация Supabase Auth
-  function initSupabase() {
-    try {
-      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      console.log('[SUDOKU] Supabase client created');
-
-      supabase.auth.onAuthStateChange((event, session) => {
-        console.log('[SUDOKU] Auth event:', event, session ? 'session exists' : 'no session');
-        if (session && session.user) {
-          currentUser = session.user;
-          myUid = session.user.id;
-          localStorage.setItem('sudoku_uid', myUid);
-          console.log('[SUDOKU] Logged in as:', myUid, session.user.email);
-          // Загружаем рейтинг из профиля
-          loadMyRating();
-        } else {
-          currentUser = null;
-          // Если нет анонимного UID — создаём
-          if (!localStorage.getItem('sudoku_uid')) {
-            const rnd = crypto.getRandomValues(new Uint8Array(8));
-            myUid = Array.from(rnd).map(b => b.toString(36).padStart(2, '0')).join('');
-            localStorage.setItem('sudoku_uid', myUid);
-          }
-          myUid = localStorage.getItem('sudoku_uid');
-        }
-        isAuthLoading = false;
-        window.dispatchEvent(new CustomEvent('auth_state_changed'));
-        // На случай если слушатель ещё не зарегистрирован — вызываем напрямую
-        try { updateAuthButton?.(); } catch(_) {}
-      });
-
-      // Проверяем текущую сессию
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session && session.user) {
-          currentUser = session.user;
-          myUid = session.user.id;
-          localStorage.setItem('sudoku_uid', myUid);
-          loadMyRating();
-        } else {
-          if (!localStorage.getItem('sudoku_uid')) {
-            const rnd = crypto.getRandomValues(new Uint8Array(8));
-            myUid = Array.from(rnd).map(b => b.toString(36).padStart(2, '0')).join('');
-            localStorage.setItem('sudoku_uid', myUid);
-          }
-          myUid = localStorage.getItem('sudoku_uid');
-        }
-        isAuthLoading = false;
-        window.dispatchEvent(new CustomEvent('auth_state_changed'));
-        try { updateAuthButton?.(); } catch(_) {}
-      }).catch(() => {
-        isAuthLoading = false;
-      });
-
-    } catch (e) {
-      console.warn('[SUDOKU] Supabase init failed:', e);
-      isAuthLoading = false;
-    }
+  function freshUid() {
+    const rnd = crypto.getRandomValues(new Uint8Array(6));
+    return Array.from(rnd).map(b => b.toString(36).padStart(2, '0')).join('');
   }
-
-  async function loadMyRating() {
-    if (!myUid || !sbOk) return;
-    const [snap] = await sbGet('duel_ratings', `uid=eq.${myUid}&limit=1`);
-    if (snap) myRating = snap.rating || 1000;
-  }
-
-  // Auth API
-  async function signInWithGoogle() {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.href,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        }
-      }
-    });
-    if (error) alert('Ошибка входа через Google: ' + error.message);
-  }
-
-  async function signInWithEmail(email, password) {
-    if (!supabase) return { error: 'Supabase не инициализирован' };
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error };
-  }
-
-  async function signUpWithEmail(email, password, name) {
-    if (!supabase) return { error: 'Supabase не инициализирован' };
-    const { error } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { name } }
-    });
-    return { error };
-  }
-
-  async function signOut() {
-    if (!supabase) return;
-    await supabase.auth.signOut();
-  }
-
-  function getAuthStatus() {
-    return { isLoggedIn: !!currentUser, user: currentUser };
-  }
-
-  initSupabase();
-
-  // Fallback: если нет UID и не залогинены — создаём анонимный
-  if (!localStorage.getItem('sudoku_uid') && !currentUser) {
-    const rnd = crypto.getRandomValues(new Uint8Array(8));
-    myUid = Array.from(rnd).map(b => b.toString(36).padStart(2, '0')).join('');
-    localStorage.setItem('sudoku_uid', myUid);
-  }
-
-  // ── Проверка доступности REST API ───────────────────────────────
-  fetch(`${SB}/duel_ratings?uid=eq.${myUid}&limit=1`, { method: 'GET', headers: HDR, mode: 'cors' })
-    .then(r => { sbOk = true; console.log('Supabase REST OK, uid:', myUid); })
-    .catch(() => { sbOk = false; console.warn('Supabase REST недоступен'); })
-    .finally(() => { fbReady = true; window.dispatchEvent(new Event('firebase_ready')); startHeartbeat(); });
-
+  myUid = freshUid();
   console.log('[SUDOKU] мой uid:', myUid);
 
-  // ── Supabase REST helpers ────────────────────────────────────────
+  // ── Проверка доступности ────────────────────────────────────────
+  fetch(`${SB}/duel_ratings?uid=eq.${myUid}&limit=1`, { method: 'GET', headers: HDR, mode: 'cors' })
+    .then(r => { sbOk = true; console.log('Supabase OK, uid:', myUid); })
+    .catch(() => { sbOk = false; console.warn('Supabase недоступен'); })
+    .finally(() => { fbReady = true; window.dispatchEvent(new Event('firebase_ready')); });
+
+  // ── Supabase helpers ─────────────────────────────────────────────
   async function sbGet(table, filter, sel) {
     let url = `${SB}/${table}?${filter}`;
     if (sel) url += `&select=${sel}`;
-    const r = await fetch(url, { method: 'GET', headers: HDR, cache: 'no-store' });
-    if (!r.ok) { console.error('[SUDOKU] sbGet error:', r.status, table, filter.slice(0,80)); return null; }
+    const r = await fetch(url, { method: 'GET', headers: HDR, mode: 'cors' });
+    if (!r.ok) return null;
     const d = await r.json();
     return Array.isArray(d) ? d : (d ? [d] : []);
   }
@@ -166,18 +48,10 @@
     const r = await fetch(`${SB}/${table}`, {
       method: 'POST', headers: HDR, mode: 'cors', body: JSON.stringify(data)
     });
-    const text = await r.text();
-    let json;
-    try { json = JSON.parse(text); } catch { json = null; }
-    if (!r.ok) {
-      console.error('[SUDOKU] sbPost error:', r.status, r.statusText, text.slice(0, 300));
-    } else {
-      console.log('[SUDOKU] sbPost ok:', table, 'code=', data.code, 'status=', data.status, 'response=', text.slice(0, 200));
-    }
-    return json;
+    return r.ok ? r.json() : null;
   }
 
-  async function sbUpsert(table, data) {
+  async function sbUpsert(table, data, matchCol) {
     const r = await fetch(`${SB}/${table}`, {
       method: 'POST', headers: { ...HDR, 'Prefer': 'resolution=merge-duplicates' }, mode: 'cors',
       body: JSON.stringify(Array.isArray(data) ? data : [data])
@@ -185,26 +59,11 @@
     return r.ok;
   }
 
-  // board/puzzle могут прийти как ["0 0 0...", ...] или [[0,0,0...], ...] — возвращаем всегда [[0,0,0...], ...]
-  function parseBoard(raw) {
-    if (!raw) return null;
-    if (Array.isArray(raw) && raw[0]) {
-      if (Array.isArray(raw[0])) return raw;
-      return raw.map(row => {
-        if (typeof row === 'string') return row.split(' ').map(Number);
-        return row;
-      });
-    }
-    return null;
-  }
-  window.parseBoard = parseBoard;
-
   async function sbUpdate(table, filter, data) {
     const r = await fetch(`${SB}/${table}?${filter}`, {
-      method: 'PATCH', headers: { ...HDR, 'Prefer': 'return=representation' }, mode: 'cors', body: JSON.stringify(data)
+      method: 'PATCH', headers: HDR, mode: 'cors', body: JSON.stringify(data)
     });
-    if (!r.ok) return [];
-    return await r.json();
+    return r.ok;
   }
 
   async function sbDelete(table, filter) {
@@ -219,142 +78,40 @@
   }
 
   // ── Rating ────────────────────────────────────────────────────────
-  async function upsertRating(delta, uid, name, source, code) {
-    console.log('[SUDOKU] upsertRating called: delta=', delta, 'uid=', uid, 'name=', name, 'sbOk=', sbOk);
-    if (!sbOk) { console.warn('[SUDOKU] upsertRating: sbOk=false, skipping'); return; }
-    uid = uid || myUid;
-    name = name || myName || 'Игрок';
-    // Не пишем в рейтинг для анонимных пользователей
-    if (uid === myUid && !currentUser) {
-      console.log('[SUDOKU] upsertRating: anon user, skip');
-      return;
-    }
-    // Проверка бана
-    if (uid === myUid && await isBanned()) {
-      console.log('[SUDOKU] upsertRating: banned, skip');
-      return;
-    }
+  async function upsertRating(delta) {
+    if (!sbOk) return;
+    const name = myName || 'Игрок';
     try {
-      const [snap] = await sbGet('duel_ratings', `uid=eq.${uid}&limit=1`);
+      const [snap] = await sbGet('duel_ratings', `uid=eq.${myUid}&limit=1`);
       if (snap) {
-        const oldR = snap.rating || 1000;
-        const newRating = Math.max(0, oldR + delta);
-        await sbUpdate('duel_ratings', `uid=eq.${uid}`, {
+        const newRating = Math.max(0, (snap.rating || 1000) + delta);
+        await sbUpdate('duel_ratings', `uid=eq.${myUid}`, {
           rating: newRating,
           games: (snap.games || 0) + 1,
           wins: (snap.wins || 0) + (delta > 0 ? 1 : 0),
-          name,
-          last_seen: Date.now()
+          name
         });
-        console.log('[SUDOKU] upsertRating: updated uid=', uid, 'newRating=', newRating);
-        if (uid === myUid) myRating = newRating;
-        logRatingChange(uid, name, oldR, newRating, source, code);
+        myRating = newRating;
       } else {
-        const oldR = 1000;
-        const newRating = Math.max(0, oldR + delta);
-        await sbUpsert('duel_ratings', { uid, name, rating: newRating, games: 1, wins: delta > 0 ? 1 : 0, last_seen: Date.now() });
-        console.log('[SUDOKU] upsertRating: created uid=', uid, 'rating=', newRating);
-        if (uid === myUid) myRating = newRating;
-        logRatingChange(uid, name, oldR, newRating, source, code);
+        myRating = Math.max(0, 1000 + delta);
+        await sbUpsert('duel_ratings', { uid: myUid, name, rating: myRating, games: 1, wins: delta > 0 ? 1 : 0 });
       }
-    } catch(e) { console.error('[SUDOKU] upsertRating error:', e); }
-  }
-
-  // ── Heartbeat: обновляет last_seen каждые 15 сек только для ЗАЛОГИНЕННЫХ ──
-  let _heartbeatInterval = null;
-  async function heartbeat() {
-    if (!sbOk || !myUid) return;
-    // Только авторизованные пользователи попадают в рейтинг
-    if (!currentUser) return;
-    // Проверяем бан
-    if (await isBanned()) return;
-    try {
-      const name = myName || currentUser.user_metadata?.name || currentUser.email?.split('@')[0] || 'Игрок';
-      await sbUpsert('duel_ratings', {
-        uid: myUid,
-        name,
-        rating: myRating,
-        last_seen: Date.now()
-      });
-    } catch(e) { /* молча */ }
-  }
-  function startHeartbeat() {
-    if (_heartbeatInterval) return;
-    heartbeat();
-    _heartbeatInterval = setInterval(heartbeat, 15000);
-  }
-
-  // ── Проверка бана ─────────────────────────────────────────────────
-  let _banCache = null;
-  async function isBanned() {
-    if (!sbOk) return false;
-    if (!myUid) return false;
-    if (_banCache && Date.now() - _banCache.checked < 10000) return _banCache.banned;
-    try {
-      const r = await fetch(`${SB}/banned_users?uid=eq.${myUid}&limit=1`, { method: 'GET', headers: HDR, mode: 'cors', cache: 'no-store' });
-      if (!r.ok) { console.warn('[SUDOKU] banned_users query failed:', r.status); return false; }
-      const data = await r.json();
-      const banned = Array.isArray(data) && data.length > 0;
-      console.log('[SUDOKU] isBanned:', banned, 'uid:', myUid, 'rows:', data?.length);
-      _banCache = { banned, checked: Date.now() };
-      return banned;
-    } catch(e) { console.warn('[SUDOKU] isBanned error:', e); return false; }
-  }
-  function refreshBanCache() { _banCache = null; }
-
-  // ── Лог изменения рейтинга (для админа/истории) ────────────────
-  async function logRatingChange(uid, name, oldR, newR, source, code) {
-    if (!sbOk || !uid) return;
-    try {
-      await sbPost('rating_history', {
-        uid, name, old_rating: oldR, new_rating: newR, delta: newR - oldR, source: source || '', duel_code: code || null, created_at: Date.now()
-      });
-    } catch(e) { /* молча */ }
+    } catch(e) { console.warn('upsertRating:', e); }
   }
 
   // ── Public API ─────────────────────────────────────────────────────
   window.FB = {
     isRtdbOk: () => sbOk,
-    isReady: () => fbReady && !isAuthLoading,
-    isSignedIn: () => !!currentUser,
-    isAuthLoading: () => isAuthLoading,
+    isReady: () => fbReady,
+    isSignedIn: () => true,
     getMyUid: () => myUid,
-    getMyName: () => (myName && myName.trim()) || currentUser?.user_metadata?.name || currentUser?.email?.split('@')[0] || 'Игрок',
-    setMyName: n => { myName = String(n).trim().slice(0, 20); localStorage.setItem('sudoku_duel_name', myName); },
-    getCurrentUser: () => currentUser,
-    signInWithGoogle,
-    signInWithEmail,
-    signUpWithEmail,
-    signOut,
-    getAuthStatus,
+    getMyName: () => myName,
+    setMyName: n => { myName = String(n).slice(0, 20); localStorage.setItem('sudoku_duel_name', myName); },
 
-    async saveRecord(rec) {
-      if (!sbOk) return false;
-      try {
-        const payload = { ...rec };
-        if (currentUser) payload.uid = currentUser.id;
-        payload.created_at = Date.now();
-        const r = await fetch(`${SB}/single_records`, {
-          method: 'POST', headers: HDR, mode: 'cors', body: JSON.stringify(payload)
-        });
-        return r.ok;
-      } catch(e) { return false; }
-    },
-    async loadRecords() {
-      if (!sbOk) return null;
-      try {
-        const r = await fetch(`${SB}/single_records?select=*&order=seconds.asc&limit=100`, {
-          method: 'GET', headers: HDR, mode: 'cors', cache: 'no-store'
-        });
-        if (!r.ok) return null;
-        const data = await r.json();
-        return Array.isArray(data) ? data : [];
-      } catch(e) { return null; }
-    },
+    async saveRecord(rec) { return false; }, // пока без Firestore
+    async loadRecords() { return null; },
 
     async createDuelRoom(puzzle, solution, playerName) {
-      // Проверка бана
-      if (await isBanned()) { alert('⛔ Вы заблокированы и не можете создавать дуэли.'); return null; }
       if (!sbOk) return null;
       const code = makeRoomCode();
       await sbPost('duel_rooms', {
@@ -388,8 +145,6 @@
     },
 
     async joinDuelRoom(code, playerName) {
-      // Проверка бана
-      if (await isBanned()) { alert('⛔ Вы заблокированы и не можете присоединяться к дуэлям.'); return { error: 'Заблокирован' }; }
       console.log('[SUDOKU] B: joinDuelRoom вызван с кодом', code);
       if (!sbOk) return { error: 'Supabase недоступен' };
       const [room] = await sbGet('duel_rooms', `code=eq.${code}&limit=1`);
@@ -406,8 +161,7 @@
         status: 'playing'
       });
       const updated = { ...room, player2_uid: myUid, player2_name: playerName || myName,
-        player2_rating: myRating, player2_correct: 0, player2_errors: 0, status: 'playing',
-        board: room.board || room.puzzle.map(r => r.slice()) };
+        player2_rating: myRating, player2_correct: 0, player2_errors: 0, status: 'playing' };
       localStorage.setItem('sudoku_room_' + code, JSON.stringify(updated));
       console.log('[SUDOKU] B: записали в localStorage, шлю BC');
       try { const bc = new BroadcastChannel('sudoku_duel_' + code); bc.postMessage(updated); bc.close(); } catch (e) { console.log('[SUDOKU] B: BC ошибка', e); }
@@ -437,10 +191,6 @@
         if (stop) return;
         sbGet('duel_rooms', `code=eq.${code}&limit=1`).then(rooms => {
           const data = rooms && rooms[0];
-          console.log('[SUDOKU] poll:', code, '→ real_code=', data ? data.code : 'null',
-            'status=', data ? data.status : 'null',
-            'puzzle=', data ? (data.puzzle ? 'есть' : 'НЕТ') : 'null',
-            'p1=', data ? data.player1_uid : 'null', 'p2=', data ? data.player2_uid : 'null');
           if (data) {
             localStorage.setItem('sudoku_room_' + code, JSON.stringify(data));
             if (data.player2_uid && data.player2_uid !== lastPlayer2Uid) {
@@ -461,24 +211,19 @@
     },
 
     async sendDuelMove(code, r, c, n, isCorrect) {
-      if (!sbOk) { console.error('[SUDOKU] sendDuelMove: sbOk=false'); return; }
+      if (!sbOk) return;
       const [room] = await sbGet('duel_rooms', `code=eq.${code}&limit=1`);
-      if (!room) { console.error('[SUDOKU] sendDuelMove: room not found'); return; }
+      if (!room) return;
       const isP1 = room.player1_uid === myUid;
       const corrKey = isP1 ? 'player1_correct' : 'player2_correct';
       const errKey = isP1 ? 'player1_errors' : 'player2_errors';
-      const board = parseBoard(room.board);
-      if (!board) { console.error('[SUDOKU] sendDuelMove: board parse failed'); return; }
+      const board = room.board.map(row => row.slice());
       board[r][c] = n;
-      const oldCorr = Number(isP1 ? (room.player1_correct || 0) : (room.player2_correct || 0));
-      const oldErr = Number(isP1 ? (room.player1_errors || 0) : (room.player2_errors || 0));
-      console.log('[SUDOKU] sendDuelMove:', code, `(${r},${c})=${n}`, 'correct?', isCorrect, 'oldCorr=', oldCorr, 'oldErr=', oldErr);
-      const updated = await sbUpdate('duel_rooms', `code=eq.${code}`, {
+      await sbUpdate('duel_rooms', `code=eq.${code}`, {
         board,
-        [corrKey]: oldCorr + (isCorrect ? 1 : 0),
-        [errKey]: oldErr + (isCorrect ? 0 : 1)
+        [corrKey]: (isP1 ? room.player1_correct : room.player2_correct || 0) + (isCorrect ? 1 : 0),
+        [errKey]: (isP1 ? room.player1_errors : room.player2_errors || 0) + (isCorrect ? 0 : 1)
       });
-      console.log('[SUDOKU] sendDuelMove result:', updated && updated.length > 0 ? 'OK' : 'FAIL');
     },
 
     async duelLose(code) {
@@ -487,198 +232,86 @@
       if (!room) return;
       const isP1 = room.player1_uid === myUid;
       await sbUpdate('duel_rooms', `code=eq.${code}`, { status: isP1 ? 'p2_won' : 'p1_won' });
-      // пишем в localStorage чтобы второй игрок сразу узнал
-      const updated = { ...room, status: isP1 ? 'p2_won' : 'p1_won' };
-      localStorage.setItem('sudoku_room_' + code, JSON.stringify(updated));
     },
 
-    cancelDuelRoom: code => { 
-      sbOk && sbDelete('duel_rooms', `code=eq.${code}`).catch(() => {}); 
-      window._mmInProgress = false;
-    },
+    cancelDuelRoom: code => sbOk && sbDelete('duel_rooms', `code=eq.${code}`).catch(() => {}),
 
-    quitDuel: async (code, status) => {
-      if (!sbOk) return;
-      // Сначала обновляем localStorage синхронно — opponent увидит через poll
-      const localRaw = localStorage.getItem('sudoku_room_' + code);
-      let updated = null;
-      if (localRaw) {
-        try { updated = JSON.parse(localRaw); } catch (_) {}
-      }
-      if (updated) {
-        updated.status = status;
-        localStorage.setItem('sudoku_room_' + code, JSON.stringify(updated));
-      }
-      // Оповещаем соперника через BroadcastChannel (мгновенно, не дожидаясь poll)
-      try {
-        const bc = new BroadcastChannel('sudoku_duel_' + code);
-        bc.postMessage({ ...updated, status, _quitNotify: true });
-        bc.close();
-      } catch (_) {}
-      // Серверное обновление — ЖДЁМ чтобы оппонент точно увидел
-      try {
-        const ok = await sbUpdate('duel_rooms', `code=eq.${code}`, { status });
-        console.log('[SUDOKU] quit sbUpdate:', ok ? 'OK' : 'FAIL');
-      } catch(e) {
-        console.log('[SUDOKU] quit sbUpdate ERROR:', e);
-      }
-    },
+    quitDuel: (code, status) => sbOk && sbUpdate('duel_rooms', `code=eq.${code}`, { status }).catch(() => {}),
 
     async joinQueue(playerName, rating, onMatch) {
-      if (window._mmInProgress) { console.log('[SUDOKU] joinQueue: уже в процессе'); return; }
-      window._mmInProgress = true;
-      if (!sbOk) { window._mmInProgress = false; alert('Supabase недоступен'); return; }
-      // Проверка бана
-      if (await isBanned()) { window._mmInProgress = false; alert('⛔ Вы заблокированы и не можете участвовать в дуэлях.'); return; }
+      if (!sbOk) { alert('Supabase недоступен'); return; }
       myRating = rating || myRating;
+      console.log('[SUDOKU] auto-match: uid=', myUid);
 
-      let _matchedOnce = false;
-      let _timeout = null;
-
-      const safeOnMatch = (roomCode, room) => {
-        if (_matchedOnce) return;
-        _matchedOnce = true;
-        clearTimeout(_timeout);
-        window._mmInProgress = false;
-        console.log('[SUDOKU] MATCH! room.code=', roomCode);
-        onMatch(roomCode, room);
+      const { puzzle, solution } = generatePuzzle(30);
+      const code = makeRoomCode();
+      const roomData = {
+        code, puzzle, solution,
+        player1_uid: myUid, player1_name: playerName || myName, player1_rating: myRating,
+        player1_correct: 0, player1_errors: 0,
+        player2_uid: null, player2_name: null, player2_rating: null,
+        player2_correct: 0, player2_errors: 0,
+        board: puzzle.map(r => r.slice()), status: 'waiting', created_at: Date.now()
       };
+      await sbPost('duel_rooms', roomData);
+      matchRoomCode = code;
+      console.log('[SUDOKU] создал комнату', code, 'status=waiting');
 
-      _timeout = setTimeout(() => {
-        if (!_matchedOnce) {
-          _matchedOnce = true;
-          window._mmInProgress = false;
-          sbDelete('matchmaking', `uid=eq.${myUid}`).catch(() => {});
-          const autoBtn = document.getElementById('duelAutoBtn');
-          if (autoBtn) { autoBtn.disabled = false; autoBtn.textContent = '🔍 Найти случайного соперника'; }
-        }
-      }, 180000);
-
-      // ─── Matchmaking: атомарный pairing через matchmaking таблицу ─
-      // 1. Пытаемся присоединиться к ожидающему игроку
-      // 2. Если никто не ждёт — сами становимся в очередь
-      const tryMatch = async () => {
-        if (_matchedOnce) return;
-        // Пытаемся присоединиться: ищем waiting и обновляем обоих атомарно
-        const result = await sbUpdate('matchmaking',
-          `uid=neq.${myUid}&status=eq.waiting&room_code=is.null`,
-          {
-            status: 'matched',
-            room_code: null  // placeholder — заполним позже
-          }
-        );
-
-        if (result && result[0]) {
-          // Нашли ожидающего — создаём игру СРАЗУ
-          const other = result[0];
-          console.log('[SUDOKU] нашли соперника:', other.uid, other.name);
-
-          // Генерируем доску (делаем это синхронно на КТО ПЕРВЫЙ УСПЕШНО ОБНОВИЛ — на joiner-е)
-          // Но! Сервера нет, делаем на joiner. Это ОК — оба используют одну доску
-          const gen = generateSeededPuzzle(myUid.slice(0, 6) + other.uid.slice(0, 4), 30);
-          const roomCode = makeRoomCode();
-          const room = {
-            code: roomCode,
-            puzzle: gen.puzzle,
-            solution: gen.solution,
-            player1_uid: other.uid,
-            player1_name: other.name,
-            player1_rating: other.rating || 1000,
-            player1_correct: 0,
-            player1_errors: 0,
-            player2_uid: myUid,
-            player2_name: playerName || myName,
-            player2_rating: myRating,
-            player2_correct: 0,
-            player2_errors: 0,
-            board: gen.puzzle.map(r => r.slice()),
-            status: 'playing',
-            created_at: Date.now()
-          };
-
-          // Атомарно: если соперник ещё waiting — создаём комнату
-          const gameResult = await sbUpdate('matchmaking',
-            `uid=eq.${other.uid}&status=eq.matched&room_code=is.null`,
-            { room_code: roomCode }
-          );
-
-          if (gameResult && gameResult[0]) {
-            // Успех! Соперник ещё matched, записываем комнату
-            await sbPost('duel_rooms', room);
-            // Записываем room_code себе
-            await sbUpdate('matchmaking', `uid=eq.${myUid}`, { room_code: roomCode });
-            console.log('[SUDOKU] комната создана:', roomCode, 'puzzle задана');
-            safeOnMatch(roomCode, room);
-            return;
-          } else {
-            // Соперник уже взял комнату (race) — просто ждём его room_code
-            await sbUpdate('matchmaking', `uid=eq.${myUid}`, { room_code: 'pending_' + myUid.slice(0, 4) });
-            console.log('[SUDOKU] race! ждём room_code от соперника');
-            setTimeout(poll, 500);
+      let matched = false;
+      let joinerOf = null; // код комнаты к которой присоединился
+      let iJoined = false; // true = я присоединился к чужой комнате (joiner)
+      let polls = 0;
+      const poll = () => {
+        if (matched) return;
+        if (polls++ > 600) { sbDelete('duel_rooms', `code=eq.${code}`).catch(() => {}); return; }
+        sbGet('duel_rooms', `code=eq.${code}&limit=1`).then(rooms => {
+          const room = rooms && rooms[0];
+          if (!room) { matched = true; return; }
+          if (room.status === 'playing' && room.player2_uid) {
+            // меня нашли! присоединились ко мне
+            matched = true;
+            console.log('[SUDOKU] игра началась!', code, 'p2=', room.player2_uid, '(я создал)');
+            // я создал комнату — играю за player1
+            onMatch(code, room);
             return;
           }
-        }
-
-        // Никто не ждёт — сами становимся в очередь
-        // Сначала удаляем старую запись (если была)
-        await sbDelete('matchmaking', `uid=eq.${myUid}`).catch(() => {});
-        await sbPost('matchmaking', {
-          uid: myUid,
-          name: playerName || myName,
-          rating: myRating,
-          status: 'waiting',
-          room_code: null,
-          created_at: Date.now()
-        });
-        console.log('[SUDOKU] встал в очередь, жду соперника...');
-
-        // Poll: проверяем свой room_code
-        setTimeout(poll, 500);
-      };
-
-      // Poll: ждём пока matchmaking обновит room_code
-      const poll = async () => {
-        if (_matchedOnce) return;
-        try {
-          const me = await sbGet('matchmaking', `uid=eq.${myUid}&limit=1`);
-          if (me && me[0]) {
-            if (me[0].room_code && me[0].room_code.startsWith && !me[0].room_code.startsWith('pending_')) {
-              // room_code есть — игра найдена, забираем данные
-              const rooms = await sbGet('duel_rooms', `code=eq.${me[0].room_code}&limit=1`);
-              if (rooms && rooms[0]) {
-                console.log('[SUDOKU] poll: игра найдена!', me[0].room_code);
-                safeOnMatch(rooms[0].code, rooms[0]);
-                return;
-              } else {
-                console.log('[SUDOKU] poll: room_code=', me[0].room_code, 'но комната ещё не создана, ждём...');
-              }
-            } else if (me[0].status === 'waiting') {
-              // Ещё ждём
+          // проверяем чужие waiting rooms
+          sbGet('duel_rooms', `status=eq.waiting&player2_uid=is.null&player1_uid=neq.${myUid}&limit=5`).then(others => {
+            if (matched) return;
+            if (others && others.length > 0) {
+              const opp = others[0];
+              console.log('[SUDOKU] нашёл ожидающего:', opp.code, 'присоединяюсь...');
+              // обновляем его комнату
+              sbUpdate('duel_rooms', `code=eq.${opp.code}`, {
+                player2_uid: myUid, player2_name: playerName || myName, player2_rating: myRating,
+                player2_correct: 0, player2_errors: 0, status: 'playing'
+              }).then(() => {
+                if (matched) return;
+                matched = true; iJoined = true; joinerOf = opp.code;
+                sbDelete('duel_rooms', `code=eq.${code}`).catch(() => {});
+                const joinRoom = { ...opp,
+                  player2_uid: myUid, player2_name: playerName || myName, player2_rating: myRating,
+                  player2_correct: 0, player2_errors: 0, status: 'playing'
+                };
+                console.log('[SUDOKU] присоединился к', opp.code);
+                onMatch(opp.code, joinRoom);
+              });
+              return;
             }
-          }
-          setTimeout(poll, 400);
-        } catch (e) {
-          console.error('[SUDOKU] poll error', e);
-          setTimeout(poll, 800);
-        }
+            setTimeout(poll, 500);
+          }).catch(() => setTimeout(poll, 1000));
+        }).catch(() => { if (!matched) setTimeout(poll, 1000); });
       };
-
-      // Запускаем
-      tryMatch();
+      poll();
+      setTimeout(() => {
+        if (!matched) sbDelete('duel_rooms', `code=eq.${code}`).catch(() => {});
+      }, 60000);
     },
 
-    leaveQueue: () => {
-      if (!sbOk || !myUid) return;
-      sbDelete('matchmaking', `uid=eq.${myUid}`).catch(() => {});
-      window._mmInProgress = false;
-      const autoBtn = document.getElementById('duelAutoBtn');
-      if (autoBtn) { autoBtn.disabled = false; autoBtn.textContent = '🔍 Найти случайного соперника'; }
-    },
+    leaveQueue: () => { if (!sbOk || !myUid) return; if (matchRoomCode) sbDelete('duel_rooms', `code=eq.${matchRoomCode}`).catch(() => {}); },
 
     upsertRating,
     getMyRating: () => sbOk ? Promise.resolve({ rating: myRating }) : Promise.resolve(null),
-    isBanned: () => isBanned(),
-    getMyRatingSync: () => myRating, // синхронный доступ для UI
     getRtdbUrl: () => 'supabase',
 
     async loadDuelRatings() {
@@ -1064,25 +697,6 @@
     line-height: 1;
   }
 
-  /* Цифра внутри numpad */
-  .num-btn {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-  }
-  .num-digit { line-height: 1; }
-  .num-remaining {
-    font-size: 0.65rem;
-    color: var(--text-dim);
-    font-weight: 400;
-    line-height: 1;
-    margin-top: 1px;
-  }
-  .num-remaining.done { color: var(--good); font-weight: bold; }
-
   /* Кнопка карандаша */
   #pencilBtn.active {
     background: rgba(129,140,248,0.2);
@@ -1362,14 +976,9 @@
 
 <!-- Экран выбора уровня -->
 <div id="levelScreen" class="screen level-screen">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <div></div>
-    <div style="display:flex;gap:6px;">
-      <button class="btn icon-btn auth-btn" id="authBtn" title="Войти">👤</button>
-      <button class="btn icon-btn" id="adminBtn" title="Админка" style="display:none" onclick="showAdminPanel()">⚙️</button>
-      <button class="btn icon-btn" id="lvlThemeBtn" title="Сменить тему">🌙</button>
-      <button class="btn icon-btn" id="lvlSoundBtn" title="Звук вкл/выкл">🔊</button>
-    </div>
+  <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;">
+    <button class="btn icon-btn" id="lvlThemeBtn" title="Сменить тему">🌙</button>
+    <button class="btn icon-btn" id="lvlSoundBtn" title="Звук вкл/выкл">🔊</button>
   </div>
   <h2>Выбери уровень сложности</h2>
   <div class="level-grid">
@@ -1400,7 +1009,7 @@
     <button class="btn duel-btn" id="showDuelBtn">⚔️ Дуэль</button>
     <button class="btn ghost" id="showRecordsBtn">🏆 Таблица рекордов</button>
     <button class="btn ghost" id="showDuelRatingsBtn">📊 Рейтинг дуэлей</button>
-    <button class="btn ghost" id="showFeedbackBtn">📨 Сообщить о баге</button>
+    <button class="btn ghost" id="resetSaveBtn">🗑 Сбросить сохранение</button>
   </div>
   <div class="footer">Игра автоматически сохраняет прогресс в этом браузере</div>
 </div>
@@ -1411,7 +1020,6 @@
     <div class="topbar-left">
       <button class="btn icon-btn" id="themeBtn" title="Сменить тему">🌙</button>
       <button class="btn icon-btn" id="soundBtn" title="Звук вкл/выкл">🔊</button>
-      <button class="btn icon-btn auth-btn" id="gameAuthBtn" title="Войти">👤</button>
     </div>
     <div class="topbar-center">
       <div class="stat">
@@ -1442,7 +1050,6 @@
   <div class="num-pad" id="numPad"></div>
 
   <div class="controls">
-    <button class="btn ghost" id="autoPlaceBtn" title="Авто-постановка: выбери цифру на нумпаде и кликай по клеткам">🎯 Авто</button>
     <button class="btn ghost" id="pencilBtn">✏️ Карандаш</button>
     <button class="btn ghost" id="hintBtn">💡 Подсказка</button>
     <button class="btn danger" id="quitBtn">✕ Выйти</button>
@@ -1476,9 +1083,7 @@
   </div>
   <div class="num-pad" id="duelNumPad"></div>
   <div class="controls">
-    <button class="btn icon-btn auth-btn" id="duelAuthBtn" title="Войти">👤</button>
-    <button class="btn ghost" id="duelPencilBtn">✏️ Карандаш</button>
-    <button class="btn ghost" id="duelQuitBtn" style="pointer-events:auto;z-index:10;position:relative;">✕ Выйти</button>
+    <button class="btn ghost" id="duelQuitBtn">✕ Выйти</button>
   </div>
 </div>
 
@@ -1624,77 +1229,6 @@ function blockClues(puzzle, br, bc) {
 
 // Генерируем puzzle: много решений, много попыток удаления,
 // выбираем с лучшим распределением. Ограничения на строки, столбцы И блоки 3x3.
-// ── Seeded RNG (для генерации одинаковой доски по коду комнаты) ──
-function seededRandom(seed) {
-  let s = 0;
-  for (let i = 0; i < seed.length; i++) s = ((s << 5) - s + seed.charCodeAt(i)) | 0;
-  return () => {
-    s = (s * 1103515245 + 12345) & 0x7fffffff;
-    return s / 0x7fffffff;
-  };
-}
-function shuffleSeeded(arr, rng) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-// Детерминистический генератор puzzles — оба игрока получают одну доску
-function generateSeededPuzzle(seed, clues) {
-  const rng = seededRandom(seed);
-  // Базовая раскладка судоку
-  const base = [];
-  for (let r = 0; r < 9; r++) {
-    base[r] = [];
-    for (let c = 0; c < 9; c++) base[r][c] = ((r * 3 + Math.floor(r / 3) + c) % 9) + 1;
-  }
-  // Перестановки на основе seed
-  for (let op = 0; op < 20; op++) {
-    const t = Math.floor(rng() * 5);
-    if (t === 0) {
-      const b = Math.floor(rng() * 3);
-      const r1 = b * 3 + Math.floor(rng() * 3);
-      const r2 = b * 3 + Math.floor(rng() * 3);
-      [base[r1], base[r2]] = [base[r2], base[r1]];
-    } else if (t === 1) {
-      const s = Math.floor(rng() * 3);
-      const c1 = s * 3 + Math.floor(rng() * 3);
-      const c2 = s * 3 + Math.floor(rng() * 3);
-      for (let r = 0; r < 9; r++) [base[r][c1], base[r][c2]] = [base[r][c2], base[r][c1]];
-    } else if (t === 2) {
-      const bands = shuffleSeeded([0, 1, 2], rng);
-      const nb = [];
-      for (let r = 0; r < 9; r++) nb[r] = [];
-      for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) nb[r][c] = base[bands[Math.floor(r / 3)] * 3 + r % 3][c];
-      for (let r = 0; r < 9; r++) base[r] = nb[r];
-    } else if (t === 3) {
-      const stacks = shuffleSeeded([0, 1, 2], rng);
-      const nb = [];
-      for (let r = 0; r < 9; r++) nb[r] = [];
-      for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) nb[r][c] = base[r][stacks[Math.floor(c / 3)] * 3 + c % 3];
-      for (let r = 0; r < 9; r++) base[r] = nb[r];
-    } else {
-      for (let r = 0; r < 9; r++) for (let c = r + 1; c < 9; c++) [base[r][c], base[c][r]] = [base[c][r], base[r][c]];
-    }
-  }
-  // Удаляем клетки
-  const solution = base.map(row => row.slice());
-  const puzzle = solution.map(row => row.slice());
-  const positions = [];
-  for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) positions.push([r, c]);
-  shuffleSeeded(positions, rng);
-  const targetRemove = 81 - clues;
-  let removed = 0;
-  for (const [r, c] of positions) {
-    if (removed >= targetRemove) break;
-    puzzle[r][c] = 0;
-    removed++;
-  }
-  return { puzzle, solution };
-}
-
 function generatePuzzle(clues) {
   const targetRemove = 81 - clues;
   // Целевое число подсказок на блок: ~clues/9, с допуском ±2
@@ -1906,11 +1440,7 @@ window.addEventListener('firebase_ready', () => { fbReady = true; });
 // Сохранить рекорд — сначала Firebase, потом локально
 async function saveRecord(rec) {
   if (!rec.name || typeof rec.seconds !== 'number') return;
-  const trimmed = { ...rec }; // уже обрезано в showWinModal
-  // Добавляем uid если залогинены
-  if (window.FB?.isSignedIn()) {
-    trimmed.uid = window.FB.getMyUid();
-  }
+  const trimmed = rec; // уже обрезано в showWinModal
   // Параллельно: Firebase (не блокирует) + локальное хранилище
   if (fbReady && window.FB) window.FB.saveRecord(trimmed);
   // Локальный fallback
@@ -2105,7 +1635,6 @@ const $ = id => document.getElementById(id);
 
 function showLevelScreen() {
   stopTimer();
-  forceHideModal();
   $('levelScreen').classList.remove('hidden');
   $('gameScreen').classList.add('hidden');
 
@@ -2184,36 +1713,17 @@ function renderCellNotes(r, c) {
   cell.appendChild(notesEl);
 }
 
-// Заметки для дуэльной доски (та же сетка 3×3 цифр-кандидатов)
-function renderDuelNotesHTML(notes) {
-  let html = '<div class="cell-notes">';
-  for (let n = 1; n <= 9; n++) {
-    html += `<span>${notes.includes(n) ? n : ''}</span>`;
-  }
-  return html + '</div>';
-}
-
-// Получить DOM-элемент дуэльной клетки
-function getDuelCellEl(r, c) {
-  return $('duelBoard').children[r*9 + c];
-}
-
 function getCellEl(r, c) {
   return $('board').children[r*9 + c];
 }
 
 function selectCell(r, c) {
-  // Если выбрана цифра на нумпаде — ставим её в клетку (авто-режим)
-  if (selectedDigit !== null && autoPlaceMode) {
-    placeNumber(selectedDigit);
-    // В авто-режиме сохраняем selectedDigit — можно ставить ту же цифру в несколько клеток
-    return;
-  }
-  // В обычном режиме: клик по клетке снимает подсветку цифры
-  clearDigitHighlight();
   const prev = selectedCell ? (selectedCell.r * 9 + selectedCell.c) : -1;
   selectedCell = { r, c };
+  // При выборе клетки снимаем подсветку цифры (режим "найти все")
+  clearDigitHighlight();
   highlightSelection();
+  // Звук выбора (не при повторном клике на ту же клетку)
   if (prev !== r * 9 + c) playSelect();
 }
 
@@ -2246,66 +1756,34 @@ function renderNumPad() {
   for (let n = 1; n <= 9; n++) {
     const btn = document.createElement('button');
     btn.className = 'num-btn';
-    btn.innerHTML = `<span class="num-digit">${n}</span><span class="num-remaining" id="numRemain${n}"></span>`;
-    btn.dataset.n = n;
-    // Обновляем счётчик "осталось"
-    updateNumRemaining(n, btn);
-    btn.addEventListener('click', () => {
-      playClick();
-      // Подсветка ВСЕГДА при клике на цифру (toggle: повторный клик снимает)
-      if (digitHighlightN === n && selectedDigit === n) {
-        // повторный клик той же цифры — снимаем выделение
-        clearDigitHighlight();
-      } else {
-        clearDigitHighlight();
-        selectedDigit = n;
-        digitHighlightN = n;
-        // подсветить все клетки с этой цифрой
-        for (let r = 0; r < 9; r++) {
-          for (let c = 0; c < 9; c++) {
-            const boardVal = state?.user[r][c] !== 0
-              ? state.user[r][c]
-              : state.puzzle[r][c];
-            if (boardVal === n) {
-              getCellEl(r, c)?.classList.add('same-num');
-            }
-          }
-        }
-        btn.classList.add('active');
-      }
-      // Если выключен авто-режим и есть выбранная клетка — ставим цифру
-      if (!autoPlaceMode && selectedCell) {
-        placeNumber(n);
-      }
-    });
+    btn.textContent = n;
+    // Показываем счётчик если игра активна
+    if (state && state.started) {
+      const done = digitCompleteCount(n);
+      btn.title = `Цифра ${n}: ${done}/9`;
+      if (done === 9) btn.dataset.complete = 'true';
+    }
+    btn.addEventListener('click', () => { playClick(); placeNumber(n); });
     pad.appendChild(btn);
   }
 }
 
-// Показывает сколько цифр `n` ещё нужно поставить (в текущей активной игре)
-function updateNumRemaining(n, btn) {
-  const el = btn.querySelector('.num-remaining') || document.getElementById('numRemain' + n);
-  if (!el) return;
-  let placed = 0;
-  if (duelBoard && duelSolution) {
-    for (let r = 0; r < 9; r++)
-      for (let c = 0; c < 9; c++)
-        if (duelBoard[r][c] === n && duelSolution[r][c] === n) placed++;
-  } else if (state && state.started && state.solution) {
-    for (let r = 0; r < 9; r++)
-      for (let c = 0; c < 9; c++)
-        if (state.user[r][c] === n && state.user[r][c] === state.solution[r][c]) placed++;
+function updatePencilBtn() {
+  const btn = $('pencilBtn');
+  if (!btn) return;
+  if (state && state.pencilMode) {
+    btn.classList.add('active');
+    btn.textContent = '✏️ Карандаш вкл.';
+  } else {
+    btn.classList.remove('active');
+    btn.textContent = '✏️ Карандаш';
   }
-  const remaining = 9 - placed;
-  el.textContent = remaining > 0 ? remaining : '✓';
-  if (remaining === 0) el.classList.add('done');
-  else el.classList.remove('done');
 }
 
 function placeNumber(n) {
   if (!state || !state.started) return;
 
-  // НЕ стираем подсветку здесь — пусть остаётся видимой
+  clearDigitHighlight();
   if (!selectedCell) return;
   const { r, c } = selectedCell;
 
@@ -2407,8 +1885,6 @@ function placeNumber(n) {
 // Визуально полностью повторяет выделение при клике на клетку:
 // .highlight (строка/столбец/блок) + .same-num (все такие же цифры)
 let digitHighlightN = null;
-let selectedDigit = null;      // 1-9: цифра выбрана на нумпаде для авто-постановки
-let autoPlaceMode = false;     // включить/выключить режим авто-постановки
 
 function toggleDigitHighlight(n) {
   if (!state || !state.started) return;
@@ -2416,27 +1892,46 @@ function toggleDigitHighlight(n) {
   // Та же цифра — выключаем
   if (digitHighlightN === n) {
     clearDigitHighlight();
-    selectedDigit = null;
     return;
   }
 
   clearDigitHighlight();
   digitHighlightN = n;
-  selectedDigit = n; // для режима авто-постановки
 
-  // Снимаем выделение клетки (чтобы не мешало подсветке цифр)
+  // Сначала снимаем выделение клетки (чтобы не мешал)
   selectedCell = null;
-  document.querySelectorAll('.cell.selected')
-    .forEach(el => el.classList.remove('selected'));
+  document.querySelectorAll('.cell.selected, .cell.highlight, .cell.same-num')
+    .forEach(el => el.classList.remove('selected', 'highlight', 'same-num'));
 
-  // Подсвечиваем ТОЛЬКО клетки с этой цифрой (без строк/столбцов)
+  // Находим ВСЕ клетки со значением n на ДОПОЛНЕННОЙ доске
+  // (puzzle + user), запоминаем их как "виртуально выбранные"
+  const matchedCells = [];
   for (let r = 0; r < 9; r++) {
     for (let c = 0; c < 9; c++) {
       const boardVal = state.user[r][c] !== 0
         ? state.user[r][c]
         : state.puzzle[r][c];
       if (boardVal === n) {
-        getCellEl(r, c).classList.add('same-num');
+        matchedCells.push({ r, c });
+        getCellEl(r, c).classList.add('selected');
+      }
+    }
+  }
+
+  // Для каждой совпавшей клетки подсвечиваем её строку, столбец, блок
+  // и все другие клетки с числом n (они уже .selected)
+  for (const { r, c } of matchedCells) {
+    // Строка + столбец
+    for (let i = 0; i < 9; i++) {
+      getCellEl(r, i).classList.add('highlight');
+      getCellEl(i, c).classList.add('highlight');
+    }
+    // Блок 3x3
+    const br = Math.floor(r / 3) * 3;
+    const bc = Math.floor(c / 3) * 3;
+    for (let rr = br; rr < br + 3; rr++) {
+      for (let cc = bc; cc < bc + 3; cc++) {
+        getCellEl(rr, cc).classList.add('highlight');
       }
     }
   }
@@ -2444,16 +1939,15 @@ function toggleDigitHighlight(n) {
   // Подсвечиваем кнопку на num-pad
   const buttons = $('numPad').querySelectorAll('.num-btn');
   for (const btn of buttons) {
-    if (Number(btn.dataset.n) === n) {
+    if (parseInt(btn.textContent, 10) === n) {
       btn.classList.add('active');
     }
   }
 }
 
 function clearDigitHighlight() {
-  if (digitHighlightN === null && selectedDigit === null) return;
+  if (digitHighlightN === null) return;
   digitHighlightN = null;
-  selectedDigit = null;
   document.querySelectorAll('.cell.selected, .cell.highlight, .cell.same-num')
     .forEach(el => el.classList.remove('selected', 'highlight', 'same-num'));
   document.querySelectorAll('.num-btn.active')
@@ -2530,12 +2024,6 @@ function formatTime(sec) {
 /* ============== GAME FLOW ============== */
 
 function newGame(levelKey) {
-  // Защита: если случайно остался duel-state, чистим
-  duelPuzzle = null;
-  duelSolution = null;
-  duelBoard = null;
-  duelCode = null;
-
   const cfg = LEVELS[levelKey];
   const { puzzle, solution } = generatePuzzle(cfg.clues);
   state = {
@@ -2615,10 +2103,9 @@ function showWinModal({ level, elapsed, errorCount, moves }) {
   modal.innerHTML = `
     <h2>🎉 Победа!</h2>
     <div class="modal-sub">${cfg.label} · ${formatTime(elapsed)} · ${errorCount} ошибок · ${moves} ходов</div>
-    <div style="color:var(--text-dim);font-size:0.85rem;margin-bottom:8px;">Рекорд сохранён автоматически. Можешь изменить имя:</div>
     <div class="name-input-row">
-      <input type="text" id="playerName" placeholder="Твоё имя" maxlength="20" value="${escapeHtml(getDefaultName())}">
-      <button class="btn primary" id="saveRecBtn">Сохранить имя</button>
+      <input type="text" id="playerName" placeholder="Твоё имя" maxlength="20" value="${getDefaultName()}">
+      <button class="btn primary" id="saveRecBtn">Сохранить</button>
     </div>
     <div class="modal-actions">
       <button class="btn" id="winNewBtn">🔄 Новая игра</button>
@@ -2626,32 +2113,12 @@ function showWinModal({ level, elapsed, errorCount, moves }) {
     </div>
   `;
   showModal();
-
-  // АВТОСОХРАНЕНИЕ — рекорд записывается сразу при победе (имя по умолчанию)
-  const defaultName = getDefaultName() || window.FB?.getMyName() || 'Аноним';
-  saveRecord({
-    name: defaultName,
-    level: level,
-    seconds: elapsed,
-    errors: errorCount,
-    moves: moves,
-    date: new Date().toISOString()
-  }).catch(e => console.error('[SUDOKU] автосохранение рекорда:', e));
-
   $('playerName').focus();
   $('playerName').addEventListener('keydown', e => {
     if (e.key === 'Enter') $('saveRecBtn').click();
   });
   $('saveRecBtn').addEventListener('click', async () => {
     const name = $('playerName').value.trim().slice(0, 30) || 'Аноним';
-    localStorage.setItem('sudoku_last_name', name);
-    // Обновляем запись — пересохраняем с новым именем (удаляем старую с дефолтом)
-    const records = loadRecords();
-    // Удаляем только что добавленную запись с дефолтным именем
-    if (records.length) {
-      records.shift();
-      localStorage.setItem(RECORDS_KEY, JSON.stringify(records));
-    }
     await saveRecord({
       name,
       level: level,
@@ -2773,18 +2240,14 @@ async function showRecordsModal() {
 
 function renderRecordsList(records, cloudOk = false) {
   const modal = $('modalContent');
-  const myUid = window.FB?.getMyUid() || localStorage.getItem('sudoku_uid');
-  const isLoggedIn = window.FB?.isSignedIn();
   const rows = records.length === 0
     ? `<div class="empty-state">Пока нет рекордов.<br>Сыграй партию и оставь свой след!</div>`
     : records.map((r, i) => {
         const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
-        const isMe = isLoggedIn && r.uid && r.uid === myUid;
-        const authBadge = isMe ? ' ✓' : (!isLoggedIn && r.uid ? '👤' : (!isLoggedIn ? '' : '👤'));
         return `
-          <div class="record-row ${rankClass} ${isMe ? 'me-row' : ''}">
+          <div class="record-row ${rankClass}">
             <div class="rank">#${i+1}</div>
-            <div class="name">${escapeHtml(r.name)}${authBadge}</div>
+            <div class="name">${escapeHtml(r.name)}</div>
             <div class="time">${formatTime(r.seconds)}</div>
             <div class="lvl-tag ${r.level}">${LEVELS[r.level]?.label || r.level}</div>
           </div>`;
@@ -2796,10 +2259,17 @@ function renderRecordsList(records, cloudOk = false) {
     <div class="records-list">${rows}</div>
     <div class="modal-actions">
       <button class="btn primary" id="recCloseBtn">Закрыть</button>
+      <button class="btn danger" id="recClearBtn" ${records.length === 0 ? 'style="display:none"' : ''}>🗑 Очистить</button>
     </div>
   `;
   showModal();
   $('recCloseBtn').addEventListener('click', hideModal);
+  $('recClearBtn')?.addEventListener('click', () => {
+    if (confirm('Удалить все рекорды? (Только локально)')) {
+      localStorage.removeItem(RECORDS_KEY);
+      renderRecordsList([]);
+    }
+  });
 }
 
 function escapeHtml(s) {
@@ -2812,8 +2282,6 @@ function showModal() {
   const m = $('modal');
   m.classList.remove('hidden');
   m.style.cssText = '';
-  m.style.zIndex = '1000';
-  m.style.display = 'flex';
 }
 function hideModal() { $('modal').classList.add('hidden'); }
 
@@ -2827,1222 +2295,11 @@ document.querySelectorAll('.level-btn').forEach(btn => {
   });
 });
 
-// ── Auth UI ──────────────────────────────────────────────────────
-function updateAuthButton() {
-  const authBtns = document.querySelectorAll('.auth-btn');
-  const user = window.FB?.getCurrentUser();
-  authBtns.forEach(btn => {
-    if (user) {
-      const name = user.user_metadata?.name || user.email?.split('@')[0] || '?';
-      btn.textContent = name.charAt(0).toUpperCase();
-      btn.title = `${name} — выйти`;
-      btn.style.background = 'linear-gradient(135deg, #7c3aed, #db2777)';
-      btn.style.color = '#fff';
-      btn.style.fontWeight = '700';
-    } else {
-      btn.textContent = '👤';
-      btn.title = 'Войти';
-      btn.style.background = '';
-      btn.style.color = '';
-      btn.style.fontWeight = '';
-    }
-  });
-  // Показываем админ-кнопку если залогинен как админ
-  const adminBtn = $('adminBtn');
-  if (adminBtn) {
-    const isAdmin = user && user.email === 'gorgic2011@gmail.com';
-    adminBtn.style.display = isAdmin ? 'flex' : 'none';
-  }
-}
-
-function showAuthModal() {
-  const user = window.FB?.getCurrentUser();
-  if (user) {
-    // Показываем профиль и кнопку выхода
-    const name = window.FB.getMyName();
-    const email = user.email || '';
-    const modal = $('modalContent');
-    modal.innerHTML = `
-      <div style="text-align:center;">
-        <div style="font-size:3rem;margin-bottom:8px;">${name.charAt(0).toUpperCase()}</div>
-        <h2 id="authProfileName">${escapeHtml(name)}</h2>
-        <div style="color:var(--text-dim);font-size:0.88rem;margin-bottom:4px;">${escapeHtml(email)}</div>
-        <div style="font-size:0.82rem;color:var(--accent);margin-bottom:16px;" id="authRatingDisplay">⭐ Загрузка рейтинга...</div>
-        <button class="btn ghost" id="authChangeNameBtn" style="width:100%;margin-bottom:8px;">✏️ Изменить ник</button>
-        <div id="authChangeNameBox" style="display:none;margin-bottom:16px;">
-          <input type="text" id="authNewNameInput" maxlength="20" placeholder="Новый ник" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--accent);background:var(--bg-soft);color:var(--text);margin-bottom:8px;font-size:14px;">
-          <div style="display:flex;gap:8px;">
-            <button class="btn primary" id="authSaveNameBtn" style="flex:1">Сохранить</button>
-            <button class="btn ghost" id="authCancelNameBtn" style="flex:1">Отмена</button>
-          </div>
-        </div>
-      </div>
-      <div class="modal-actions" style="justify-content:center;">
-        <button class="btn danger" id="authSignOutBtn" style="width:100%">🚪 Выйти</button>
-        <button class="btn ghost" id="authModalCloseBtn" style="width:100%">Закрыть</button>
-      </div>
-    `;
-    showModal();
-    window.FB.getMyRating().then(r => {
-      const el = document.getElementById('authRatingDisplay');
-      if (el) el.textContent = `⭐ Рейтинг: ${r?.rating || 1000}`;
-    });
-
-    // Смена ника
-    const showInput = () => {
-      const box = document.getElementById('authChangeNameBox');
-      const input = document.getElementById('authNewNameInput');
-      if (box && input) { box.style.display = 'block'; input.value = window.FB.getMyName(); setTimeout(() => input.focus(), 50); }
-    };
-    const hideInput = () => {
-      const box = document.getElementById('authChangeNameBox');
-      if (box) box.style.display = 'none';
-    };
-    document.getElementById('authChangeNameBtn')?.addEventListener('click', showInput);
-    document.getElementById('authCancelNameBtn')?.addEventListener('click', hideInput);
-    document.getElementById('authSaveNameBtn')?.addEventListener('click', async () => {
-      const input = document.getElementById('authNewNameInput');
-      const newName = (input?.value || '').trim();
-      if (!newName) { alert('Имя не может быть пустым'); return; }
-      if (newName.length > 20) { alert('Максимум 20 символов'); return; }
-      const btn = document.getElementById('authSaveNameBtn');
-      btn.disabled = true; btn.textContent = '⏳...';
-      // Сохраняем в localStorage (приоритет над user_metadata)
-      window.FB.setMyName(newName);
-      // Обновляем в Supabase duel_ratings (если есть запись)
-      try {
-        const myUid = window.FB.getMyUid();
-        await fetch(`${_SB_REST}/duel_ratings?uid=eq.${myUid}`, {
-          method: 'PATCH', headers: _SB_HDR, mode: 'cors',
-          body: JSON.stringify({ name: newName })
-        });
-      } catch(e) { console.warn('не удалось обновить имя в duel_ratings', e); }
-      // Обновляем UI
-      const h2 = document.getElementById('authProfileName');
-      if (h2) h2.textContent = newName;
-      hideInput();
-      btn.disabled = false; btn.textContent = 'Сохранить';
-      updateAuthButton();
-      // Если сейчас в дуэли — обновим HUD
-      if (typeof duelMyName !== 'undefined' && $('myDuelName')) {
-        $('myDuelName').textContent = newName;
-      }
-      console.log('[SUDOKU] ник изменён на', newName);
-    });
-
-    $('authSignOutBtn')?.addEventListener('click', async () => {
-      await window.FB.signOut();
-      hideModal();
-    });
-    $('authModalCloseBtn')?.addEventListener('click', hideModal);
-  } else {
-    // Форма входа
-    const modal = $('modalContent');
-    modal.innerHTML = `
-      <div style="text-align:center;margin-bottom:16px;">
-        <h2>🔐 Вход</h2>
-        <div style="color:var(--text-dim);font-size:0.88rem;">Войди чтобы сохранять рейтинг и рекорды</div>
-      </div>
-      <button class="btn" id="authGoogleBtn" style="width:100%;margin-bottom:12px;background:#fff;color:#333;font-weight:600;border:1px solid #dadce0;border-radius:8px;padding:10px 16px;">
-        <svg width="18" height="18" viewBox="0 0 18 18" style="vertical-align:middle;margin-right:8px;">
-          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
-          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-          <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
-          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
-        </svg>
-        Войти через Google
-      </button>
-      <div class="duel-or">или</div>
-      <div class="cloud-fields">
-        <label>Email</label>
-        <input type="email" id="authEmailInput" placeholder="pochta@mail.ru">
-      </div>
-      <div class="cloud-fields">
-        <label>Пароль</label>
-        <input type="password" id="authPasswordInput" placeholder="••••••">
-      </div>
-      <button class="btn primary" id="authEmailBtn" style="width:100%;margin-bottom:8px;">Войти</button>
-      <button class="btn ghost" id="authSignupBtn" style="width:100%;margin-bottom:12px;">Регистрация</button>
-      <button class="btn ghost" id="authModalCloseBtn" style="width:100%">Отмена</button>
-    `;
-    showModal();
-
-    $('authGoogleBtn')?.addEventListener('click', async () => {
-      $('authGoogleBtn').disabled = true;
-      $('authGoogleBtn').textContent = '⏳ Перенаправляем...';
-      await window.FB.signInWithGoogle();
-      hideModal();
-    });
-
-    $('authEmailBtn')?.addEventListener('click', async () => {
-      const email = $('authEmailInput')?.value.trim();
-      const password = $('authPasswordInput')?.value;
-      if (!email || !password) { alert('Введи email и пароль'); return; }
-      $('authEmailBtn').disabled = true;
-      $('authEmailBtn').textContent = '⏳';
-      const { error } = await window.FB.signInWithEmail(email, password);
-      $('authEmailBtn').disabled = false;
-      $('authEmailBtn').textContent = 'Войти';
-      if (error) alert('Ошибка входа: ' + error.message);
-      else hideModal();
-    });
-
-    $('authSignupBtn')?.addEventListener('click', async () => {
-      const email = $('authEmailInput')?.value.trim();
-      const password = $('authPasswordInput')?.value;
-      if (!email || !password) { alert('Введи email и пароль'); return; }
-      if (password.length < 6) { alert('Пароль должен быть минимум 6 символов'); return; }
-      $('authSignupBtn').disabled = true;
-      $('authSignupBtn').textContent = '⏳ Регистрируем...';
-      const { error } = await window.FB.signUpWithEmail(email, password, email.split('@')[0]);
-      $('authSignupBtn').disabled = false;
-      $('authSignupBtn').textContent = 'Регистрация';
-      if (error) alert('Ошибка регистрации: ' + error.message);
-      else {
-        alert('📧 Письмо с подтверждением отправлено на ' + email + '! Проверь почту и подтверди регистрацию.');
-      }
-    });
-
-    $('authModalCloseBtn')?.addEventListener('click', hideModal);
-  }
-}
-
-// Auth button clicks (script at bottom of body — DOM already ready)
-document.querySelectorAll('.auth-btn').forEach(btn => {
-  btn.addEventListener('click', () => showAuthModal());
-});
-// Слушаем изменение auth состояния
-// =============== АДМИНКА ===========================
-// Глобальные константы для админки (продублированы из IIFE)
-const _SB_URL = 'https://iirydyaesqidmvpsmzfn.supabase.co';
-const _SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g';
-const _SB_HDR = { 'apikey': _SB_ANON, 'Content-Type': 'application/json' };
-const _SB_REST = _SB_URL + '/rest/v1';
-
-async function showAdminPanel() {
-  const user = window.FB?.getCurrentUser();
-  if (!user || user.email !== 'gorgic2011@gmail.com') {
-    alert('Доступ только для администратора');
-    return;
-  }
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div class="duel-modal-step">
-      <h2>⚙️ Админ-панель</h2>
-      <div class="modal-sub">Управление Sudoku Duel</div>
-      <div style="display:flex;gap:6px;margin:16px 0 8px;flex-wrap:wrap;">
-        <button class="btn primary" id="adminTabMonitor" style="flex:1;min-width:80px">📊 Мониторинг</button>
-        <button class="btn primary" id="adminTabRecords" style="flex:1;min-width:80px">🏆 Рекорды</button>
-        <button class="btn primary" id="adminTabRatings" style="flex:1;min-width:80px">⚔️ Рейтинг</button>
-        <button class="btn primary" id="adminTabRooms" style="flex:1;min-width:80px">🎮 Дуэли</button>
-        <button class="btn primary" id="adminTabFeedback" style="flex:1;min-width:80px">📨 Связь</button>
-      </div>
-      <div id="adminSection" style="text-align:left;margin:8px 0;">
-        <div style="color:var(--text-dim)">Выберите раздел</div>
-      </div>
-      <div id="adminActions" style="display:flex;flex-direction:column;gap:8px;"></div>
-      <div style="margin-top:16px;display:flex;gap:8px;">
-        <button class="btn ghost" id="adminCloseBtn" style="flex:1">✕ Закрыть панель</button>
-        <button class="btn ghost" id="adminLogoutBtn" style="flex:1;color:var(--warn)">🚪 Выйти из аккаунта</button>
-      </div>
-    </div>
-  `;
-  const m = document.getElementById('modal');
-  m.classList.remove('hidden');
-  m.style.zIndex = '1000';
-  m.style.display = 'flex';
-
-  const tables = [
-    { name: 'duel_rooms', label: 'Дуэли (duel_rooms)' },
-    { name: 'matchmaking', label: 'Matchmaking' },
-    { name: 'duel_ratings', label: 'Рейтинг дуэлей (duel_ratings)' },
-  ];
-
-  document.getElementById('adminCloseBtn').addEventListener('click', () => {
-    document.getElementById('modal')?.classList.add('hidden');
-  });
-  document.getElementById('adminLogoutBtn')?.addEventListener('click', async () => {
-    if (!confirm('Выйти из аккаунта? Это разлогинит тебя из Google.')) return;
-    await window.FB.signOut();
-    document.getElementById('modal')?.classList.add('hidden');
-  });
-
-  // ── Раздел: Таблица рекордов ──
-  // Чтобы не дублировать обработчики при повторных вызовах showAdminPanel,
-  // используем dataset-маркер + replaceWith
-  const wireAdminTab = (id, fn) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const newEl = el.cloneNode(true);
-    el.parentNode.replaceChild(newEl, el);
-    newEl.addEventListener('click', () => { stopAdminTimer(); fn(); });
-  };
-  wireAdminTab('adminTabRecords', showAdminRecords);
-  wireAdminTab('adminTabRatings', showAdminRatings);
-  wireAdminTab('adminTabRooms', showAdminRooms);
-  wireAdminTab('adminTabMonitor', showAdminMonitor);
-  wireAdminTab('adminTabFeedback', showAdminFeedback);
-
-  function stopAdminTimer() {
-    if (_adminRefreshTimer) { clearInterval(_adminRefreshTimer); _adminRefreshTimer = null; }
-  }
-}
-
-// Live-refresh таймер для админки (для вкладки Дуэли)
-let _adminRefreshTimer = null;
-
-// ─── Раздел «Таблица рекордов» (одиночная игра, из Supabase) ───
-async function showAdminRecords() {
-  const section = document.getElementById('adminSection');
-  const actionsDiv = document.getElementById('adminActions');
-  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
-  actionsDiv.innerHTML = '';
-
-  try {
-    const r = await fetch(`${_SB_REST}/single_records?select=*&order=seconds.asc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors', cache: 'no-store' });
-    const data = await r.json();
-    if (!Array.isArray(data) || !data.length) {
-      section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рекордов нет</div>';
-    } else {
-      let html = '<div style="max-height:300px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;">';
-      html += '<div style="display:grid;grid-template-columns:24px 30px 1fr 70px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span></span><span>#</span><span>Имя</span><span>Время</span><span>Сложн.</span></div>';
-      data.forEach((r, i) => {
-        const t = formatTime(r.seconds || 0);
-        html += `<div style="display:grid;grid-template-columns:24px 30px 1fr 70px 60px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
-          <input type="checkbox" class="admin-rec-chk" data-id="${escapeHtml(r.id)}" style="width:14px;height:14px;">
-          <span style="color:var(--text-dim)">${i+1}</span>
-          <span>${escapeHtml(r.name || '—')}</span>
-          <span>${t}</span>
-          <span style="color:var(--text-dim)">${r.level || '—'}</span>
-        </div>`;
-      });
-      html += '</div>';
-      html += `<div style="color:var(--text-dim);font-size:0.7rem;margin-top:4px;text-align:right">показано ${data.length}</div>`;
-      section.innerHTML = html;
-    }
-  } catch(e) {
-    section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
-  }
-
-  // Действия
-  const selBtn = document.createElement('button');
-  selBtn.className = 'btn ghost';
-  selBtn.style.width = '100%';
-  selBtn.style.textAlign = 'left';
-  selBtn.textContent = '☑️ Выделить все';
-  selBtn.addEventListener('click', () => {
-    document.querySelectorAll('.admin-rec-chk').forEach(c => c.checked = true);
-  });
-  actionsDiv.appendChild(selBtn);
-
-  const delBtn = document.createElement('button');
-  delBtn.className = 'btn ghost';
-  delBtn.style.width = '100%';
-  delBtn.style.textAlign = 'left';
-  delBtn.style.color = 'var(--warn)';
-  delBtn.textContent = '🗑️ Удалить выделенные';
-  delBtn.addEventListener('click', async () => {
-    const ids = Array.from(document.querySelectorAll('.admin-rec-chk:checked')).map(c => c.dataset.id);
-    if (!ids.length) { alert('Ничего не выделено'); return; }
-    if (!confirm(`Удалить ${ids.length} рекордов?`)) return;
-    for (const id of ids) {
-      await fetch(`${_SB_REST}/single_records?id=eq.${id}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-    }
-    alert('Удалено: ' + ids.length);
-    showAdminRecords();
-  });
-  actionsDiv.appendChild(delBtn);
-
-  const clearAll = document.createElement('button');
-  clearAll.className = 'btn ghost';
-  clearAll.style.width = '100%';
-  clearAll.style.textAlign = 'left';
-  clearAll.style.color = 'var(--warn)';
-  clearAll.textContent = '⚠️ Очистить ВСЕ рекорды';
-  clearAll.addEventListener('click', async () => {
-    if (!confirm('Удалить ВСЕ рекорды? Это необратимо!')) return;
-    const dr = await fetch(`${_SB_REST}/single_records?id=neq.`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-    alert(dr.ok ? 'OK' : 'Ошибка: ' + dr.status);
-    if (dr.ok) showAdminRecords();
-  });
-  actionsDiv.appendChild(clearAll);
-}
-
-// ─── Раздел «Рейтинг дуэлей» (Supabase duel_ratings) ───
-async function showAdminRatings() {
-  const section = document.getElementById('adminSection');
-  const actionsDiv = document.getElementById('adminActions');
-  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
-  actionsDiv.innerHTML = '';
-
-  try {
-    // Загружаем рейтинги + баны параллельно. Только залогиненные (UUID содержит дефисы)
-    const [ratingsR, bannedR] = await Promise.all([
-      fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins&uid=like.*-*&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }),
-      fetch(`${_SB_REST}/banned_users?select=uid`, { method: 'GET', headers: _SB_HDR, mode: 'cors' }).catch(() => ({ ok: false, status: 0, json: async () => [] }))
-    ]);
-    const data = ratingsR.ok ? await ratingsR.json() : [];
-    const banned = bannedR.ok ? await bannedR.json() : [];
-    const bannedSet = new Set(banned.map(b => b.uid));
-
-    if (!Array.isArray(data) || !data.length) {
-      section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Рейтингов нет</div>';
-    } else {
-      let html = '<div style="max-height:300px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;">';
-      html += '<div style="display:grid;grid-template-columns:24px 1fr 70px 50px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span>#</span><span>Имя</span><span>Рейтинг</span><span>Игр</span><span>Побед</span></div>';
-      data.forEach((r, i) => {
-        const isBanned = bannedSet.has(r.uid);
-        html += `<div style="display:grid;grid-template-columns:24px 1fr 70px 50px 60px 90px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;${isBanned ? 'opacity:0.5;' : ''}">
-          <span style="color:var(--text-dim)">${i+1}</span>
-          <span>${isBanned ? '🚫 ' : ''}${escapeHtml(r.name || r.uid?.slice(0,8) || '—')}</span>
-          <span style="color:var(--accent);font-weight:bold">${r.rating ?? 1000}</span>
-          <span>${r.games ?? 0}</span>
-          <span style="color:var(--good)">${r.wins ?? 0}</span>
-          <span style="display:flex;gap:2px;">
-            <button class="btn ghost admin-rating-history" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name||'')}" style="padding:2px 6px;font-size:0.7rem" title="История">📜</button>
-            <button class="btn ghost admin-rating-edit" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name||'')}" data-rating="${r.rating ?? 1000}" style="padding:2px 6px;font-size:0.7rem" title="Изменить рейтинг">✏️</button>
-            <button class="btn ghost admin-rating-ban" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name||'')}" data-banned="${isBanned ? '1' : '0'}" style="padding:2px 6px;font-size:0.7rem;color:${isBanned ? 'var(--good)' : 'var(--warn)'}" title="${isBanned ? 'Разбанить' : 'Забанить'}">${isBanned ? '✓' : '🚫'}</button>
-          </span>
-        </div>`;
-      });
-      html += '</div>';
-      html += '<div style="color:var(--text-dim);font-size:0.75rem;margin-top:4px;text-align:right">показано ' + data.length + '</div>';
-      section.innerHTML = html;
-
-      // Обработчики кнопок
-      section.querySelectorAll('.admin-rating-history').forEach(b => b.addEventListener('click', () => showRatingHistory(b.dataset.uid, b.dataset.name)));
-      section.querySelectorAll('.admin-rating-edit').forEach(b => b.addEventListener('click', () => editUserRating(b.dataset.uid, b.dataset.name, Number(b.dataset.rating))));
-      section.querySelectorAll('.admin-rating-ban').forEach(b => b.addEventListener('click', async () => {
-        const uid = b.dataset.uid;
-        const name = b.dataset.name;
-        const wasBanned = b.dataset.banned === '1';
-        if (wasBanned) {
-          if (!confirm(`Разбанить игрока ${name}?`)) return;
-          await fetch(`${_SB_REST}/banned_users?uid=eq.${uid}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-        } else {
-          if (!confirm(`Забанить игрока ${name}? Он не сможет играть в дуэли.`)) return;
-          await fetch(`${_SB_REST}/banned_users`, { method: 'POST', headers: _SB_HDR, mode: 'cors', body: JSON.stringify({ uid, name, banned_at: Date.now(), banned_by: 'admin' }) });
-        }
-        showAdminRatings();
-      }));
-    }
-
-    // Действия
-    const refreshBtn = document.createElement('button');
-    refreshBtn.className = 'btn ghost';
-    refreshBtn.style.width = '100%';
-    refreshBtn.style.textAlign = 'left';
-    refreshBtn.textContent = '🔄 Обновить';
-    refreshBtn.addEventListener('click', showAdminRatings);
-    actionsDiv.appendChild(refreshBtn);
-
-    const clearAll = document.createElement('button');
-    clearAll.className = 'btn ghost';
-    clearAll.style.width = '100%';
-    clearAll.style.textAlign = 'left';
-    clearAll.textContent = '🗑️ Очистить весь рейтинг';
-    clearAll.addEventListener('click', async () => {
-      if (!confirm('Удалить ВСЕ рейтинги? Игроки начнут с 1000!')) return;
-      const dr = await fetch(`${_SB_REST}/duel_ratings?uid=neq.`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-      alert(dr.ok ? 'OK' : 'Ошибка: ' + dr.status);
-      if (dr.ok) showAdminPanel();
-    });
-    actionsDiv.appendChild(clearAll);
-
-    // Удалить только анонимные записи (uid без дефисов)
-    const cleanAnon = document.createElement('button');
-    cleanAnon.className = 'btn ghost';
-    cleanAnon.style.width = '100%';
-    cleanAnon.style.textAlign = 'left';
-    cleanAnon.style.color = 'var(--warn)';
-    cleanAnon.textContent = '🧹 Удалить анонимных';
-    cleanAnon.addEventListener('click', async () => {
-      if (!confirm('Удалить все записи анонимных пользователей (старые 16-символьные uid)?')) return;
-      const dr = await fetch(`${_SB_REST}/duel_ratings?uid=not.like.*-*`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-      alert(dr.ok ? 'OK' : 'Ошибка: ' + dr.status);
-      if (dr.ok) showAdminPanel();
-    });
-    actionsDiv.appendChild(cleanAnon);
-
-  } catch(e) {
-    section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка загрузки: ' + e.message + '</div>';
-  }
-}
-
-// Показать историю изменения рейтинга
-async function showRatingHistory(uid, name) {
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div class="duel-modal-step">
-      <h2>📜 История рейтинга</h2>
-      <div class="modal-sub">${escapeHtml(name || uid.slice(0,8))}</div>
-      <div id="ratingHistoryBox" style="text-align:left;margin:12px 0;color:var(--text-dim)">Загрузка...</div>
-      <button class="btn ghost" id="rhCloseBtn" style="width:100%">← Назад</button>
-    </div>
-  `;
-  document.getElementById('modal')?.classList.remove('hidden');
-  try {
-    const r = await fetch(`${_SB_REST}/rating_history?select=*&uid=eq.${uid}&order=created_at.desc&limit=100`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-    const data = await r.json();
-    const box = document.getElementById('ratingHistoryBox');
-    if (!Array.isArray(data) || !data.length) {
-      box.innerHTML = '<div style="padding:20px 0">История пуста</div>';
-    } else {
-      let html = '<div style="max-height:400px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px;font-size:0.85rem;">';
-      data.forEach(h => {
-        const date = h.created_at ? new Date(h.created_at).toLocaleString('ru-RU') : '';
-        const delta = h.delta || 0;
-        const sourceLabel = {win:'победа', lose:'поражение', quit_win:'соперник сдался', quit_lose:'вы сами сдались', admin:'админ'}[h.source] || h.source;
-        const dColor = delta > 0 ? 'var(--good)' : delta < 0 ? 'var(--warn)' : 'var(--text-dim)';
-        const arrow = delta > 0 ? '↑' : delta < 0 ? '↓' : '·';
-        html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-          <span><span style="color:${dColor}">${arrow}${delta > 0 ? '+' : ''}${delta}</span> · ${escapeHtml(sourceLabel)}${h.duel_code ? ` · ${escapeHtml(h.duel_code)}` : ''}</span>
-          <span style="color:var(--text-dim);font-size:0.75rem">${h.old_rating} → <b style="color:var(--accent)">${h.new_rating}</b> · ${date}</span>
-        </div>`;
-      });
-      html += '</div>';
-      box.innerHTML = html;
-    }
-  } catch(e) {
-    document.getElementById('ratingHistoryBox').innerHTML = '<div style="color:red">Ошибка: ' + e.message + '</div>';
-  }
-  document.getElementById('rhCloseBtn').addEventListener('click', () => {
-    showAdminPanel();
-    setTimeout(() => document.getElementById('adminTabRatings')?.click(), 50);
-  });
-}
-
-// Изменить рейтинг вручную
-async function editUserRating(uid, name, currentR) {
-  // Показываем модалку с инпутом (prompt() может блокироваться на GitHub Pages)
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div class="duel-modal-step">
-      <h2>✏️ Изменить рейтинг</h2>
-      <div class="modal-sub">${escapeHtml(name || uid.slice(0,8))} · сейчас: ${currentR}</div>
-      <div class="cloud-fields">
-        <label>Новый рейтинг</label>
-        <input type="number" id="newRatingInput" min="0" value="${currentR}" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--accent);background:var(--bg-soft);color:var(--text);font-size:1.1rem;">
-      </div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn primary" id="saveRatingBtn" style="flex:1">💾 Сохранить</button>
-        <button class="btn ghost" id="cancelRatingBtn" style="flex:1">Отмена</button>
-      </div>
-    </div>
-  `;
-  document.getElementById('modal')?.classList.remove('hidden');
-  setTimeout(() => document.getElementById('newRatingInput')?.focus(), 50);
-
-  document.getElementById('cancelRatingBtn').addEventListener('click', () => {
-    showAdminPanel();
-    setTimeout(() => document.getElementById('adminTabRatings')?.click(), 50);
-  });
-
-  document.getElementById('saveRatingBtn').addEventListener('click', async () => {
-    const input = document.getElementById('newRatingInput');
-    const num = parseInt(input?.value, 10);
-    if (isNaN(num) || num < 0) { alert('Введите число >= 0'); return; }
-    const oldR = currentR;
-    const delta = num - oldR;
-    const btn = document.getElementById('saveRatingBtn');
-    btn.disabled = true; btn.textContent = '⏳...';
-    try {
-      // PATCH рейтинга
-      await fetch(`${_SB_REST}/duel_ratings?uid=eq.${uid}`, {
-        method: 'PATCH', headers: _SB_HDR, mode: 'cors',
-        body: JSON.stringify({ rating: num })
-      });
-      // Запись в историю
-      await fetch(`${_SB_REST}/rating_history`, {
-        method: 'POST', headers: _SB_HDR, mode: 'cors',
-        body: JSON.stringify({ uid, name, old_rating: oldR, new_rating: num, delta, source: 'admin', duel_code: null, created_at: Date.now() })
-      });
-      alert(`Рейтинг изменён: ${oldR} → ${num}`);
-      showAdminPanel();
-      setTimeout(() => document.getElementById('adminTabRatings')?.click(), 50);
-    } catch(e) {
-      alert('Ошибка: ' + e.message);
-      btn.disabled = false; btn.textContent = '💾 Сохранить';
-    }
-  });
-}
-
-// ─── Раздел «Дуэли» (комнаты) — мониторинг и удаление ───
-async function showAdminRooms() {
-  // Останавливаем предыдущий таймер если был
-  if (_adminRefreshTimer) { clearInterval(_adminRefreshTimer); _adminRefreshTimer = null; }
-
-  const section = document.getElementById('adminSection');
-  const actionsDiv = document.getElementById('adminActions');
-  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
-  actionsDiv.innerHTML = '';
-
-  const render = async () => {
-    try {
-      // Только колонки нужные для мониторинга (без огромных puzzle/solution/board)
-      const sel = 'code,status,player1_name,player1_uid,player1_rating,player1_correct,player1_errors,player2_name,player2_uid,player2_rating,player2_correct,player2_errors,created_at';
-      const r = await fetch(`${_SB_REST}/duel_rooms?select=${sel}&order=created_at.desc&limit=50`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-      const data = await r.json();
-      if (!Array.isArray(data) || !data.length) {
-        section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Нет активных дуэлей</div>';
-        return;
-      }
-
-      const now = Date.now();
-      const statusColor = s => ({playing:'var(--good)', waiting:'var(--warn)', p1_won:'var(--accent)', p2_won:'var(--accent)', p1_quit:'var(--text-dim)', p2_quit:'var(--text-dim)'}[s] || 'var(--text-dim)');
-      const statusLabel = s => ({playing:'играют', waiting:'ожидает', p1_won:'победа p1', p2_won:'победа p2', p1_quit:'p1 вышел', p2_quit:'p2 вышел'}[s] || s);
-
-      let html = '<div style="max-height:380px;overflow-y:auto;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:6px;">';
-      data.forEach(room => {
-        const age = Math.floor((now - (room.created_at || 0)) / 1000);
-        const ageStr = age < 60 ? `${age}с` : age < 3600 ? `${Math.floor(age/60)}м` : `${Math.floor(age/3600)}ч`;
-        const p1Name = room.player1_name || '—';
-        const p2Name = room.player2_name || '<span style="color:var(--text-dim)">ждёт</span>';
-        const p1Score = `${room.player1_correct || 0}✓ / ${room.player1_errors || 0}✗`;
-        const p2Score = `${room.player2_correct || 0}✓ / ${room.player2_errors || 0}✗`;
-        const p1Rate = room.player1_rating ?? 1000;
-        const p2Rate = room.player2_rating ?? 1000;
-        html += `
-          <div style="border-bottom:1px solid rgba(255,255,255,0.06);padding:8px 4px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-              <span style="font-family:monospace;color:var(--accent);font-weight:bold">${escapeHtml(room.code)}</span>
-              <span style="color:${statusColor(room.status)};font-size:11px;font-weight:bold">${statusLabel(room.status)}</span>
-              <span style="color:var(--text-dim);font-size:11px">${ageStr}</span>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
-              <div>
-                <div><b style="color:var(--good)">P1:</b> ${escapeHtml(p1Name)} <span style="color:var(--text-dim)">(${p1Rate})</span></div>
-                <div style="color:var(--text-dim);font-size:11px">${p1Score} · ${escapeHtml((room.player1_uid||'').slice(0,8))}</div>
-              </div>
-              <div>
-                <div><b style="color:var(--accent)">P2:</b> ${p2Name} <span style="color:var(--text-dim)">${room.player2_uid ? `(${p2Rate})` : ''}</span></div>
-                <div style="color:var(--text-dim);font-size:11px">${room.player2_uid ? p2Score + ' · ' + escapeHtml((room.player2_uid||'').slice(0,8)) : ''}</div>
-              </div>
-            </div>
-            <div style="display:flex;gap:6px;margin-top:6px;">
-              <button class="btn ghost admin-room-view" data-code="${escapeHtml(room.code)}" style="flex:1;padding:4px;font-size:11px">👁 Открыть доску</button>
-              <button class="btn ghost admin-room-del" data-code="${escapeHtml(room.code)}" style="flex:1;padding:4px;font-size:11px;color:var(--warn)">🗑 Удалить</button>
-            </div>
-          </div>
-        `;
-      });
-      html += '</div>';
-      html += `<div style="color:var(--text-dim);font-size:11px;margin-top:6px;text-align:right">показано ${data.length} последних</div>`;
-      section.innerHTML = html;
-
-      // Удаление одной комнаты
-      section.querySelectorAll('.admin-room-del').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const code = btn.dataset.code;
-          if (!confirm(`Удалить комнату ${code}?`)) return;
-          btn.disabled = true; btn.textContent = '⏳...';
-          const dr = await fetch(`${_SB_REST}/duel_rooms?code=eq.${code}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-          if (dr.ok) { render(); }
-          else { btn.disabled = false; btn.textContent = '🗑 Удалить'; alert('Ошибка: ' + dr.status); }
-        });
-      });
-
-      // Открыть доску (read-only просмотр)
-      section.querySelectorAll('.admin-room-view').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const code = btn.dataset.code;
-          openAdminBoard(code);
-        });
-      });
-    } catch(e) {
-      section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
-    }
-  };
-
-  await render();
-
-  // Автообновление убрано — пользователь жмёт «Обновить» вручную
-
-  // Кнопки в actionsDiv
-  const refreshBtn = document.createElement('button');
-  refreshBtn.className = 'btn ghost';
-  refreshBtn.style.width = '100%';
-  refreshBtn.style.textAlign = 'left';
-  refreshBtn.textContent = '🔄 Обновить сейчас';
-  refreshBtn.addEventListener('click', render);
-  actionsDiv.appendChild(refreshBtn);
-
-  const cleanStale = document.createElement('button');
-  cleanStale.className = 'btn ghost';
-  cleanStale.style.width = '100%';
-  cleanStale.style.textAlign = 'left';
-  cleanStale.textContent = '🧹 Удалить все waiting (>5м) и finished';
-  cleanStale.addEventListener('click', async () => {
-    if (!confirm('Удалить все комнаты со статусом waiting старше 5 минут И все завершённые?')) return;
-    cleanStale.disabled = true; cleanStale.textContent = '⏳...';
-    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
-    // Удалить старые waiting
-    const r1 = await fetch(`${_SB_REST}/duel_rooms?status=eq.waiting&created_at=lt.${fiveMinAgo}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-    // Удалить завершённые
-    const r2 = await fetch(`${_SB_REST}/duel_rooms?status=in.(p1_won,p2_won,p1_quit,p2_quit)`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-    alert(`waiting: ${r1.ok ? 'OK' : r1.status}, finished: ${r2.ok ? 'OK' : r2.status}`);
-    render();
-    cleanStale.disabled = false; cleanStale.textContent = '🧹 Удалить все waiting (>5м) и finished';
-  });
-  actionsDiv.appendChild(cleanStale);
-}
-
-// Останавливаем таймер автообновления при закрытии модалки
-const _origHideModal = window.hideModal;
-window.hideModal = function() {
-  if (_adminRefreshTimer) { clearInterval(_adminRefreshTimer); _adminRefreshTimer = null; }
-  return _origHideModal ? _origHideModal.apply(this, arguments) : null;
-};
-
-// ─── Просмотр доски дуэли (read-only спектатор) ───
-async function openAdminBoard(code) {
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <div class="duel-modal-step">
-      <h2>👁 Доска ${escapeHtml(code)}</h2>
-      <div class="modal-sub">Загрузка...</div>
-      <div id="adminBoardBox" style="margin:12px 0;"></div>
-      <div style="margin-top:12px;display:flex;gap:8px;">
-        <button class="btn ghost" id="adminBoardRefresh" style="flex:1">🔄 Обновить</button>
-        <button class="btn ghost" id="adminBoardClose" style="flex:1">← К списку</button>
-      </div>
-    </div>
-  `;
-  document.getElementById('modal')?.classList.remove('hidden');
-
-  const renderBoard = (room) => {
-    const box = document.getElementById('adminBoardBox');
-    const puzzle = room.puzzle || [];
-    const board = room.board || puzzle;
-    const solution = room.solution || [];
-    const subs = modal.querySelector('.modal-sub');
-    if (subs) subs.innerHTML = `<b>${escapeHtml(room.player1_name||'—')}</b> vs <b>${escapeHtml(room.player2_name||'ждёт')}</b> · статус: ${room.status} · <span style="color:var(--accent)">P1 ${room.player1_correct||0}✓/${room.player1_errors||0}✗</span> · <span style="color:var(--good)">P2 ${room.player2_correct||0}✓/${room.player2_errors||0}✗</span>`;
-
-    if (!board.length) {
-      box.innerHTML = '<div style="color:var(--text-dim);padding:20px 0;">Доска недоступна</div>';
-      return;
-    }
-
-    // Сетка 9x9, цифры из board, оригинал подсвечен, ходы игроков — обычные
-    let html = '<div style="display:inline-grid;grid-template-columns:repeat(9,36px);border:2px solid var(--accent);background:var(--accent);gap:1px;">';
-    for (let r = 0; r < 9; r++) {
-      for (let c = 0; c < 9; c++) {
-        const isOriginal = puzzle[r] && puzzle[r][c] !== 0;
-        const v = board[r] && board[r][c];
-        const isCorrect = v && solution[r] && solution[r][c] === v;
-        const isWrong = v && solution[r] && solution[r][c] !== v;
-        let bg = 'var(--panel)';
-        let color = 'var(--text)';
-        if (isOriginal) { bg = 'var(--bg-soft)'; color = 'var(--text-dim)'; }
-        else if (isCorrect) { bg = 'var(--bg-soft)'; color = 'var(--good)'; }
-        else if (isWrong) { bg = 'var(--bg-soft)'; color = 'var(--warn)'; }
-        // толстые границы 3x3
-        const borderTop = r % 3 === 0 ? 'border-top:2px solid var(--accent);' : '';
-        const borderLeft = c % 3 === 0 ? 'border-left:2px solid var(--accent);' : '';
-        const borderRight = c === 8 ? '' : '';
-        const borderBottom = r === 8 ? '' : '';
-        html += `<div style="${borderTop}${borderLeft}${borderRight}${borderBottom}width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-weight:${isOriginal?'bold':'normal'};background:${bg};color:${color};font-size:16px;">${v || ''}</div>`;
-      }
-    }
-    html += '</div>';
-    html += `<div style="margin-top:8px;font-size:11px;color:var(--text-dim);display:flex;gap:12px;flex-wrap:wrap;">
-      <span><span style="display:inline-block;width:10px;height:10px;background:var(--bg-soft);border:1px solid var(--text-dim);vertical-align:middle"></span> оригинал</span>
-      <span><span style="color:var(--good)">█</span> правильный ход</span>
-      <span><span style="color:var(--warn)">█</span> ошибка</span>
-    </div>`;
-    box.innerHTML = html;
-  };
-
-  const loadBoard = async () => {
-    try {
-      const r = await fetch(`${_SB_REST}/duel_rooms?code=eq.${code}&limit=1`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-      const data = await r.json();
-      if (!data || !data[0]) {
-        document.getElementById('adminBoardBox').innerHTML = '<div style="color:red">Комната не найдена</div>';
-        return;
-      }
-      renderBoard(data[0]);
-    } catch(e) {
-      document.getElementById('adminBoardBox').innerHTML = '<div style="color:red">Ошибка: ' + e.message + '</div>';
-    }
-  };
-
-  await loadBoard();
-  document.getElementById('adminBoardRefresh').addEventListener('click', loadBoard);
-  document.getElementById('adminBoardClose').addEventListener('click', () => {
-    // Возврат к списку — перерисовываем админ-панель
-    showAdminPanel();
-    // сразу переключаемся на вкладку Дуэли
-    setTimeout(() => document.getElementById('adminTabRooms')?.click(), 50);
-  });
-}
-
-// ─── Раздел «Мониторинг»: онлайн, пользователи, активные дуэли ───
-async function showAdminMonitor() {
-  if (_adminRefreshTimer) { clearInterval(_adminRefreshTimer); _adminRefreshTimer = null; }
-
-  const section = document.getElementById('adminSection');
-  const actionsDiv = document.getElementById('adminActions');
-  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
-  actionsDiv.innerHTML = '';
-
-  const render = async () => {
-    try {
-      // 1. Активные дуэли
-      const roomsR = await fetch(`${_SB_REST}/duel_rooms?select=code,status,player1_name,player1_uid,player1_rating,player1_correct,player1_errors,player2_name,player2_uid,player2_rating,player2_correct,player2_errors,created_at&order=created_at.desc&limit=100`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-      const rooms = await roomsR.json();
-
-      // 2. Пользователи (из duel_ratings) + кто онлайн (last_seen за последние 30 сек)
-      const cutoff = Date.now() - 30000;
-      const usersR = await fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins,last_seen&uid=like.*-*&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-      const users = await usersR.json();
-
-      // 3. Matchmaking (кто ищет соперника)
-      const queueR = await fetch(`${_SB_REST}/matchmaking?select=uid,name,rating,created_at&status=eq.waiting`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-      const queue = await queueR.json();
-
-      const playing = rooms.filter(r => r.status === 'playing');
-      const waiting = rooms.filter(r => r.status === 'waiting');
-      const finished = rooms.filter(r => ['p1_won','p2_won','p1_quit','p2_quit'].includes(r.status));
-      // Онлайн — все, кто слал heartbeat за последние 30 сек
-      const onlineUsers = (users || []).filter(u => u.last_seen && u.last_seen > cutoff);
-      const onlineCount = onlineUsers.length;
-
-      const statusColor = s => ({playing:'var(--good)', waiting:'var(--warn)', p1_won:'var(--accent)', p2_won:'var(--accent)', p1_quit:'var(--text-dim)', p2_quit:'var(--text-dim)'}[s] || 'var(--text-dim)');
-      const statusLabel = s => ({playing:'🎮 играют', waiting:'⏳ ожидает', p1_won:'✅ победа p1', p2_won:'✅ победа p2', p1_quit:'🚪 p1 вышел', p2_quit:'🚪 p2 вышел'}[s] || s);
-
-      let html = `
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
-          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
-            <div style="font-size:1.6rem;font-weight:bold;color:var(--good)">${onlineCount}</div>
-            <div style="font-size:0.75rem;color:var(--text-dim)">Онлайн</div>
-          </div>
-          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
-            <div style="font-size:1.6rem;font-weight:bold;color:var(--accent)">${playing.length}</div>
-            <div style="font-size:0.75rem;color:var(--text-dim)">Активных дуэлей</div>
-          </div>
-          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
-            <div style="font-size:1.6rem;font-weight:bold;color:var(--warn)">${queue.length}</div>
-            <div style="font-size:0.75rem;color:var(--text-dim)">В очереди</div>
-          </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
-          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
-            <div style="font-size:1.4rem;font-weight:bold">${users.length}</div>
-            <div style="font-size:0.75rem;color:var(--text-dim)">Всего игроков</div>
-          </div>
-          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
-            <div style="font-size:1.4rem;font-weight:bold">${finished.length}</div>
-            <div style="font-size:0.75rem;color:var(--text-dim)">Завершено</div>
-          </div>
-          <div style="background:var(--bg-soft);padding:10px;border-radius:8px;text-align:center;">
-            <div style="font-size:1.4rem;font-weight:bold">${waiting.length}</div>
-            <div style="font-size:0.75rem;color:var(--text-dim)">Ждут 2-го</div>
-          </div>
-        </div>
-
-        <div style="font-weight:bold;margin:12px 0 6px;">📋 Активные дуэли</div>
-        <div style="max-height:240px;overflow-y:auto;">
-      `;
-
-      if (playing.length === 0 && waiting.length === 0) {
-        html += '<div style="color:var(--text-dim);padding:8px 0;">Нет активных дуэлей</div>';
-      } else {
-        [...playing, ...waiting].slice(0, 20).forEach(room => {
-          const p1Name = room.player1_name || '—';
-          const p2Name = room.player2_name || '—';
-          html += `
-            <div style="background:var(--bg-soft);padding:8px 10px;border-radius:6px;margin-bottom:6px;font-size:0.85rem;">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-                <span style="font-family:monospace;color:var(--accent);font-weight:bold">${escapeHtml(room.code)}</span>
-                <span style="color:${statusColor(room.status)};font-size:0.75rem">${statusLabel(room.status)}</span>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;">
-                <div>
-                  <b style="color:var(--good)">${escapeHtml(p1Name)}</b>
-                  <span style="color:var(--text-dim);font-size:0.75rem"> ${room.player1_rating || 1000}</span>
-                  <span style="color:var(--text-dim);font-size:0.75rem"> · ${room.player1_correct||0}✓ ${room.player1_errors||0}✗</span>
-                </div>
-                <span style="color:var(--text-dim)">vs</span>
-                <div>
-                  <b style="color:var(--accent)">${escapeHtml(p2Name)}</b>
-                  <span style="color:var(--text-dim);font-size:0.75rem"> ${room.player2_rating || 1000}</span>
-                  <span style="color:var(--text-dim);font-size:0.75rem"> · ${room.player2_correct||0}✓ ${room.player2_errors||0}✗</span>
-                </div>
-              </div>
-              <div style="display:flex;gap:4px;margin-top:6px;">
-                <button class="btn ghost admin-mon-view" data-code="${escapeHtml(room.code)}" style="flex:1;padding:3px;font-size:0.75rem">👁 Доска</button>
-                <button class="btn ghost admin-mon-winner" data-code="${escapeHtml(room.code)}" style="flex:1;padding:3px;font-size:0.75rem;color:var(--good)">🏆 Победитель</button>
-                <button class="btn ghost admin-mon-del" data-code="${escapeHtml(room.code)}" style="flex:0;padding:3px 8px;font-size:0.75rem;color:var(--warn)">🗑</button>
-              </div>
-            </div>
-          `;
-        });
-      }
-
-      // Топ-10 игроков
-      html += `<div style="font-weight:bold;margin:16px 0 6px;">👥 Игроки (топ-${Math.min(10, users.length)})</div>`;
-      html += '<div style="max-height:160px;overflow-y:auto;">';
-      if (!users.length) {
-        html += '<div style="color:var(--text-dim);font-size:0.85rem">Пока нет зарегистрированных</div>';
-      } else {
-        html += '<div style="background:var(--bg-soft);padding:8px 10px;border-radius:6px;font-size:0.85rem;">';
-        users.slice(0, 10).forEach((u, i) => {
-          html += `<div style="display:grid;grid-template-columns:24px 1fr 70px 50px;gap:6px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-            <span style="color:var(--text-dim)">${i+1}</span>
-            <span>${escapeHtml(u.name || u.uid?.slice(0,8) || '—')}</span>
-            <span style="color:var(--accent);font-weight:bold;text-align:right">${u.rating ?? 1000}</span>
-            <span style="color:var(--text-dim);text-align:right">${u.games||0} игр</span>
-          </div>`;
-        });
-        html += '</div>';
-      }
-
-      // Очередь matchmaking
-      if (queue.length) {
-        html += `<div style="font-weight:bold;margin:16px 0 6px;">🔍 В очереди matchmaking</div>`;
-        queue.forEach(q => {
-          html += `<div style="background:var(--bg-soft);padding:6px 10px;border-radius:6px;margin-bottom:4px;font-size:0.85rem;">
-            <b>${escapeHtml(q.name || '—')}</b>
-            <span style="color:var(--text-dim)"> · рейтинг ${q.rating || 1000}</span>
-            <span style="color:var(--text-dim);font-size:0.75rem;float:right">${escapeHtml((q.uid||'').slice(0,8))}</span>
-          </div>`;
-        });
-      }
-
-      // Список онлайн-пользователей
-      html += '</div>';
-      html += `<div style="font-weight:bold;margin:16px 0 6px;">🟢 Онлайн сейчас (${onlineUsers.length})</div>`;
-      html += '<div style="max-height:160px;overflow-y:auto;">';
-      if (onlineUsers.length === 0) {
-        html += '<div style="color:var(--text-dim);font-size:0.85rem">Никого нет онлайн</div>';
-      } else {
-        html += '<div style="background:var(--bg-soft);padding:8px 10px;border-radius:6px;font-size:0.85rem;max-height:200px;overflow-y:auto;">';
-        onlineUsers.forEach(u => {
-          const sec = Math.floor((Date.now() - (u.last_seen || 0)) / 1000);
-          html += `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-            <span>${escapeHtml(u.name || u.uid?.slice(0,8) || '—')}</span>
-            <span style="color:var(--text-dim);font-size:0.75rem">${sec < 60 ? sec + 'с' : Math.floor(sec/60) + 'м'} · рейтинг ${u.rating || 1000}</span>
-          </div>`;
-        });
-        html += '</div>';
-      }
-      html += '</div>';
-
-      html += `<div style="color:var(--text-dim);font-size:0.7rem;margin-top:8px;text-align:right">Обновлено: ${new Date().toLocaleTimeString('ru-RU')}</div>`;
-      section.innerHTML = html;
-
-      // Обработчики кнопок
-      section.querySelectorAll('.admin-mon-view').forEach(b => b.addEventListener('click', () => openAdminBoard(b.dataset.code)));
-      section.querySelectorAll('.admin-mon-del').forEach(b => b.addEventListener('click', async () => {
-        if (!confirm('Удалить комнату ' + b.dataset.code + '?')) return;
-        await fetch(`${_SB_REST}/duel_rooms?code=eq.${b.dataset.code}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-        render();
-      }));
-      section.querySelectorAll('.admin-mon-winner').forEach(b => b.addEventListener('click', () => declareWinner(b.dataset.code)));
-
-    } catch(e) {
-      section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
-    }
-  };
-
-  await render();
-
-  // Автообновление каждые 5 сек (для онлайн-счётчика)
-  _adminRefreshTimer = setInterval(render, 5000);
-
-  const refreshBtn = document.createElement('button');
-  refreshBtn.className = 'btn ghost';
-  refreshBtn.style.width = '100%';
-  refreshBtn.style.textAlign = 'left';
-  refreshBtn.textContent = '🔄 Обновить сейчас';
-  refreshBtn.addEventListener('click', render);
-  actionsDiv.appendChild(refreshBtn);
-}
-
-// ─── Объявить победителя дуэли (админ) ───
-async function declareWinner(code) {
-  try {
-    const r = await fetch(`${_SB_REST}/duel_rooms?code=eq.${code}&limit=1`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-    const data = await r.json();
-    if (!data || !data[0]) { alert('Комната не найдена'); return; }
-    const room = data[0];
-    if (room.status !== 'playing') { alert('Дуэль уже завершена (' + room.status + ')'); return; }
-
-    const p1Name = room.player1_name || 'P1';
-    const p2Name = room.player2_name || 'P2';
-    const p1Score = `${room.player1_correct||0}✓/${room.player1_errors||0}✗`;
-    const p2Score = `${room.player2_correct||0}✓/${room.player2_errors||0}✗`;
-    const p1Rate = room.player1_rating || 1000;
-    const p2Rate = room.player2_rating || 1000;
-
-    const modal = document.getElementById('modalContent');
-    modal.innerHTML = `
-      <div class="duel-modal-step">
-        <h2>🏆 Объявить победителя</h2>
-        <div class="modal-sub">Код: ${escapeHtml(code)}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0;">
-          <button class="btn primary" id="declareP1" style="padding:16px 8px;line-height:1.4;">
-            <div style="font-size:1.1rem;font-weight:bold">🏆 P1</div>
-            <div style="font-size:0.85rem;margin-top:4px">${escapeHtml(p1Name)}</div>
-            <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px">рейтинг ${p1Rate} · ${p1Score}</div>
-          </button>
-          <button class="btn primary" id="declareP2" style="padding:16px 8px;line-height:1.4;">
-            <div style="font-size:1.1rem;font-weight:bold">🏆 P2</div>
-            <div style="font-size:0.85rem;margin-top:4px">${escapeHtml(p2Name)}</div>
-            <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px">рейтинг ${p2Rate} · ${p2Score}</div>
-          </button>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button class="btn ghost" id="declareDraw" style="flex:1">🤝 Ничья (без рейтинга)</button>
-          <button class="btn ghost" id="declareCancel" style="flex:1">← Назад</button>
-        </div>
-      </div>
-    `;
-    document.getElementById('modal')?.classList.remove('hidden');
-
-    document.getElementById('declareP1').addEventListener('click', () => applyWinner(code, 'p1_won'));
-    document.getElementById('declareP2').addEventListener('click', () => applyWinner(code, 'p2_won'));
-    document.getElementById('declareDraw').addEventListener('click', () => applyWinner(code, 'draw'));
-    document.getElementById('declareCancel').addEventListener('click', () => {
-      showAdminPanel();
-      setTimeout(() => document.getElementById('adminTabMonitor')?.click(), 50);
-    });
-  } catch(e) { alert('Ошибка: ' + e.message); }
-}
-
-async function applyWinner(code, result) {
-  try {
-    // Обновляем статус комнаты
-    const status = result === 'draw' ? 'draw' : result;
-    const dr = await fetch(`${_SB_REST}/duel_rooms?code=eq.${code}`, {
-      method: 'PATCH', headers: _SB_HDR, mode: 'cors',
-      body: JSON.stringify({ status })
-    });
-    if (!dr.ok) { alert('Не удалось обновить комнату: ' + dr.status); return; }
-
-    // Если есть победитель — обновляем рейтинги
-    if (result === 'p1_won' || result === 'p2_won') {
-      const r = await fetch(`${_SB_REST}/duel_rooms?code=eq.${code}&limit=1`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-      const data = await r.json();
-      const room = data[0];
-      const myR = result === 'p1_won' ? (room.player1_rating || 1000) : (room.player2_rating || 1000);
-      const oppR = result === 'p1_won' ? (room.player2_rating || 1000) : (room.player1_rating || 1000);
-      const K = 30;
-      const expected = 1 / (1 + Math.pow(10, (oppR - myR) / 400));
-      const delta = Math.round(K * (1 - expected));
-
-      const winnerUid = result === 'p1_won' ? room.player1_uid : room.player2_uid;
-      const loserUid = result === 'p1_won' ? room.player2_uid : room.player1_uid;
-      const winnerName = result === 'p1_won' ? room.player1_name : room.player2_name;
-      const loserName = result === 'p1_won' ? room.player2_name : room.player1_name;
-
-      // Админ сам обновляет рейтинги (так как он объявил победителя)
-      await updateUserRating(winnerUid, winnerName, delta);
-      await updateUserRating(loserUid, loserName, -delta);
-      alert(`Победитель: ${winnerName} (+${delta})\nПроигравший: ${loserName} (-${delta})`);
-    } else {
-      alert('Ничья — рейтинги не изменены');
-    }
-    showAdminPanel();
-    setTimeout(() => document.getElementById('adminTabMonitor')?.click(), 50);
-  } catch(e) { alert('Ошибка: ' + e.message); }
-}
-
-async function updateUserRating(uid, name, delta) {
-  if (!uid) return;
-  const r = await fetch(`${_SB_REST}/duel_ratings?uid=eq.${uid}&limit=1`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-  const data = await r.json();
-  const cur = data && data[0];
-  const oldR = cur ? Number(cur.rating || 1000) : 1000;
-  const newR = Math.max(0, oldR + delta);
-  const payload = { uid, rating: newR, name: name || cur?.name || 'Игрок' };
-  if (cur) {
-    payload.games = (cur.games || 0) + 1;
-    if (delta > 0) payload.wins = (cur.wins || 0) + 1;
-  }
-  await fetch(`${_SB_REST}/duel_ratings`, {
-    method: 'POST', headers: { ..._SB_HDR, 'Prefer': 'resolution=merge-duplicates' }, mode: 'cors',
-    body: JSON.stringify(payload)
-  });
-}
-
-// ─── Раздел «Обратная связь» в админке ───
-async function showAdminFeedback() {
-  const section = document.getElementById('adminSection');
-  const actionsDiv = document.getElementById('adminActions');
-  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
-  actionsDiv.innerHTML = '';
-
-  try {
-    const r = await fetch(`${_SB_REST}/feedback?select=*&order=created_at.desc&limit=100`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
-    const data = await r.json();
-    if (!Array.isArray(data) || !data.length) {
-      section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Сообщений пока нет</div>';
-    } else {
-      let html = '<div style="max-height:400px;overflow-y:auto;">';
-      data.forEach((fb, i) => {
-        const date = fb.created_at ? new Date(fb.created_at).toLocaleString('ru-RU') : '';
-        const typeLabel = {bug:'🐛 Баг', idea:'💡 Идея', other:'📝 Другое'}[fb.type] || fb.type;
-        const typeColor = {bug:'var(--warn)', idea:'var(--good)', other:'var(--accent)'}[fb.type] || 'var(--text-dim)';
-        const unread = !fb.read;
-        html += `<div style="background:var(--bg-soft);padding:10px;border-radius:6px;margin-bottom:8px;${unread ? 'border-left:3px solid var(--accent);' : ''}">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-            <span style="font-size:0.8rem;font-weight:bold;color:${typeColor}">${typeLabel}</span>
-            <span style="color:var(--text-dim);font-size:0.7rem">${date}</span>
-          </div>
-          <div style="font-size:0.85rem;color:var(--text);margin-bottom:4px;">
-            <b>${escapeHtml(fb.name || 'Аноним')}</b>
-            ${fb.email ? `<span style="color:var(--text-dim);font-size:0.75rem"> · ${escapeHtml(fb.email)}</span>` : ''}
-          </div>
-          <div style="font-size:0.85rem;color:var(--text);line-height:1.4;white-space:pre-wrap;word-break:break-word;">${escapeHtml(fb.message || '')}</div>
-          <div style="margin-top:6px;display:flex;gap:6px;">
-            <button class="btn ghost admin-fb-read" data-id="${fb.id}" data-read="${fb.read ? '1' : '0'}" style="flex:0;padding:3px 8px;font-size:0.7rem">${fb.read ? '↩ Не прочитано' : '✓ Прочитано'}</button>
-            <button class="btn ghost admin-fb-del" data-id="${fb.id}" style="flex:0;padding:3px 8px;font-size:0.7rem;color:var(--warn)">🗑 Удалить</button>
-          </div>
-        </div>`;
-      });
-      html += '</div>';
-      const unreadCount = data.filter(f => !f.read).length;
-      html = `<div style="font-size:0.85rem;margin-bottom:8px;color:var(--text-dim)">Всего: ${data.length}${unreadCount > 0 ? ` · <span style="color:var(--accent)">не прочитано: ${unreadCount}</span>` : ''}</div>` + html;
-      section.innerHTML = html;
-
-      section.querySelectorAll('.admin-fb-read').forEach(b => b.addEventListener('click', async () => {
-        const id = b.dataset.id;
-        const newRead = b.dataset.read === '1' ? false : true;
-        await fetch(`${_SB_REST}/feedback?id=eq.${id}`, { method: 'PATCH', headers: _SB_HDR, mode: 'cors', body: JSON.stringify({ read: newRead }) });
-        showAdminFeedback();
-      }));
-      section.querySelectorAll('.admin-fb-del').forEach(b => b.addEventListener('click', async () => {
-        if (!confirm('Удалить сообщение?')) return;
-        await fetch(`${_SB_REST}/feedback?id=eq.${b.dataset.id}`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
-        showAdminFeedback();
-      }));
-    }
-  } catch(e) {
-    section.innerHTML = '<div style="color:red;padding:12px 0;">Ошибка: ' + e.message + '</div>';
-  }
-
-  // Кнопка обновить
-  const refreshBtn = document.createElement('button');
-  refreshBtn.className = 'btn ghost';
-  refreshBtn.style.width = '100%';
-  refreshBtn.style.textAlign = 'left';
-  refreshBtn.textContent = '🔄 Обновить';
-  refreshBtn.addEventListener('click', showAdminFeedback);
-  actionsDiv.appendChild(refreshBtn);
-}
-
-// ─── Модалка «Сообщить о баге/идее» для пользователей ───
-function showFeedbackModal() {
-  const user = window.FB?.getCurrentUser();
-  const myName = window.FB?.getMyName() || '';
-  const myEmail = user?.email || '';
-  const modal = $('modalContent');
-  modal.innerHTML = `
-    <div class="duel-modal-step">
-      <h2>📨 Обратная связь</h2>
-      <div class="modal-sub">Нашёл баг или есть идея? Расскажи!</div>
-      <div style="display:flex;gap:8px;margin:12px 0;">
-        <button class="btn feedback-type-btn" data-type="bug" style="flex:1">🐛 Баг</button>
-        <button class="btn feedback-type-btn" data-type="idea" style="flex:1">💡 Идея</button>
-        <button class="btn feedback-type-btn" data-type="other" style="flex:1">📝 Другое</button>
-      </div>
-      <div class="cloud-fields">
-        <label>Имя (необязательно)</label>
-        <input type="text" id="fbName" maxlength="30" value="${escapeHtml(myName)}" placeholder="Как тебя зовут?">
-      </div>
-      <div class="cloud-fields">
-        <label>Email (необязательно, чтобы ответить)</label>
-        <input type="email" id="fbEmail" maxlength="60" value="${escapeHtml(myEmail)}" placeholder="email@example.com">
-      </div>
-      <div class="cloud-fields">
-        <label>Сообщение *</label>
-        <textarea id="fbMessage" maxlength="2000" rows="5" placeholder="Расскажи подробнее..." style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--accent);background:var(--bg-soft);color:var(--text);font-family:inherit;font-size:14px;resize:vertical;"></textarea>
-      </div>
-      <div class="modal-actions">
-        <button class="btn primary" id="fbSubmitBtn" style="flex:1">📨 Отправить</button>
-        <button class="btn ghost" id="fbCancelBtn" style="flex:1">Отмена</button>
-      </div>
-    </div>
-  `;
-  showModal();
-  let selectedType = 'bug';
-  const updateTypeUI = () => {
-    modal.querySelectorAll('.feedback-type-btn').forEach(b => {
-      if (b.dataset.type === selectedType) b.classList.add('active');
-      else b.classList.remove('active');
-    });
-  };
-  updateTypeUI();
-  modal.querySelectorAll('.feedback-type-btn').forEach(b => b.addEventListener('click', () => {
-    selectedType = b.dataset.type;
-    updateTypeUI();
-  }));
-  $('fbCancelBtn').addEventListener('click', hideModal);
-  $('fbSubmitBtn').addEventListener('click', async () => {
-    const msg = ($('fbMessage').value || '').trim();
-    if (!msg) { alert('Напиши сообщение'); return; }
-    const btn = $('fbSubmitBtn');
-    btn.disabled = true; btn.textContent = '⏳...';
-    try {
-      const r = await fetch(`${_SB_REST}/feedback`, {
-        method: 'POST', headers: _SB_HDR, mode: 'cors',
-        body: JSON.stringify({
-          type: selectedType,
-          name: ($('fbName').value || '').trim() || null,
-          email: ($('fbEmail').value || '').trim() || null,
-          message: msg,
-          uid: user?.id || null,
-          read: false,
-          created_at: Date.now()
-        })
-      });
-      if (r.ok) {
-        alert('✅ Спасибо! Сообщение отправлено админу.');
-        hideModal();
-      } else {
-        alert('Ошибка: ' + r.status);
-        btn.disabled = false; btn.textContent = '📨 Отправить';
-      }
-    } catch(e) {
-      alert('Ошибка: ' + e.message);
-      btn.disabled = false; btn.textContent = '📨 Отправить';
-    }
-  });
-}
-
-// Утилиты
-function formatTime(sec) {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-// ===========================================
-window.addEventListener('auth_state_changed', () => {
-  updateAuthButton();
-});
-// Начальное обновление кнопки
-setTimeout(updateAuthButton, 100);
-// Повторные попытки — на случай если событие успело сработать до регистрации слушателя
-setTimeout(updateAuthButton, 500);
-setTimeout(updateAuthButton, 1500);
-setTimeout(updateAuthButton, 3000);
-
 $('resumeBtn').addEventListener('click', resumeGame);
 $('showRecordsBtn').addEventListener('click', showRecordsModal);
 $('showDuelBtn').addEventListener('click', () => {
-  if (!window.FB.isReady()) {
-    alert('⏳ Подождите, авторизация загружается...');
-    return;
-  }
   if (!window.FB.isSignedIn()) {
-    showAuthModal();
+    alert('Подождите, авторизация Firebase загружается...');
     return;
   }
   if (!window.FB.isRtdbOk()) {
@@ -4055,47 +2312,26 @@ $('showDuelRatingsBtn').addEventListener('click', async () => {
   if (!window.FB.isSignedIn()) { alert('Подождите...'); return; }
   await showDuelRatingsModal();
 });
-$('showFeedbackBtn')?.addEventListener('click', () => showFeedbackModal());
-document.addEventListener('click', async e => {
-  if (e.target && e.target.id === 'duelQuitBtn') {
-    console.log('[SUDOKU] quit clicked');
-    if (_duelEnded) return;
-    const confirmed = confirm('Покинуть дуэль? Ты получишь -рейтинг.');
-    if (confirmed && duelCode) {
+$('duelQuitBtn').addEventListener('click', () => {
+  if (confirm('Покинуть дуэль? Текущий счёт не будет засчитан.')) {
+    if (duelCode) {
       const status = duelPlayer === 'p1' ? 'p1_quit' : 'p2_quit';
-      // Сначала СООБЩАЕМ оппоненту о выходе (await)
-      await window.FB.quitDuel(duelCode, status);
-      hideModal();
-      duelCleanup();
-      // endDuelGame покажет модалку с результатами
-      endDuelGame('quit_lose');
-      // НЕ вызываем showLevelScreen — модалка уже показывает меню
+      window.FB.quitDuel(duelCode, status).catch(() => {});
     }
+    duelCleanup();
+    hideModal();
+    showLevelScreen();
   }
-}, true); // capture phase
+});
+$('resetSaveBtn').addEventListener('click', () => {
+  if (confirm('Удалить сохранённую партию? Все несохранённые результаты будут потеряны.')) {
+    clearState();
+    showLevelScreen();
+  }
+});
 
 // Переключатели темы и звука
 $('themeBtn')?.addEventListener('click', () => { toggleTheme(); playClick(); });
-
-// Клик ВНЕ доски/numPad/контролов = снять выделение
-document.addEventListener('click', (e) => {
-  if (!state || !state.started) return;
-  if (state.notes && state.notes.length) {} // no-op
-  const target = e.target;
-  const inBoard = target.closest && (target.closest('.cell') || target.closest('#numPad') || target.closest('.controls'));
-  const isNumBtn = target.closest && target.closest('.num-btn');
-  const isPencil = target.closest && (target.closest('#pencilBtn') || target.closest('#hintBtn') || target.closest('#quitBtn'));
-  // Клик на num-pad не сбрасывает выделение (там своя логика)
-  // Клик на клетку/контролы — не сбрасываем (там обрабатывается)
-  // Клик ВНЕ этих областей — сбрасываем выделение
-  if (!inBoard && !isNumBtn && !isPencil) {
-    if (selectedCell) {
-      selectedCell = null;
-      clearDigitHighlight();
-      highlightSelection();
-    }
-  }
-});
 $('soundBtn')?.addEventListener('click', () => {
   toggleSound();
   if (soundEnabled) playClick();
@@ -4125,62 +2361,12 @@ $('quitBtn').addEventListener('click', () => {
   }
 });
 $('hintBtn').addEventListener('click', showHint);
-$('pencilBtn').addEventListener('click', () => { togglePencilMode(); });
-$('duelPencilBtn')?.addEventListener('click', () => { togglePencilMode(); });
-
-// Авто-постановка: включить/выключить режим
-function toggleAutoPlace() {
-  autoPlaceMode = !autoPlaceMode;
-  const btn = $('autoPlaceBtn');
-  if (btn) {
-    if (autoPlaceMode) { btn.classList.add('active'); btn.textContent = '🎯 Авто вкл'; }
-    else { btn.classList.remove('active'); btn.textContent = '🎯 Авто'; }
-  }
+$('pencilBtn').addEventListener('click', () => {
+  if (!state || !state.started) return;
+  state.pencilMode = !state.pencilMode;
+  updatePencilBtn();
   playClick();
-}
-$('autoPlaceBtn')?.addEventListener('click', toggleAutoPlace);
-
-function togglePencilMode() {
-  if (state && state.started) {
-    state.pencilMode = !state.pencilMode;
-    updatePencilBtn();
-    playClick();
-    return;
-  }
-  if (duelCode && duelBoard) {
-    duelPencilMode = !duelPencilMode;
-    updatePencilBtn();
-    updateDuelPencilBtn();
-    playClick();
-  }
-}
-
-function updateDuelPencilBtn() {
-  const btn = $('duelPencilBtn');
-  if (!btn) return;
-  if (duelPencilMode) {
-    btn.classList.add('active');
-    btn.textContent = '✏️ Карандаш вкл.';
-  } else {
-    btn.classList.remove('active');
-    btn.textContent = '✏️ Карандаш';
-  }
-}
-
-function updatePencilBtn() {
-  const active = (state && state.pencilMode) || duelPencilMode;
-  ['pencilBtn', 'duelPencilBtn'].forEach(id => {
-    const btn = $(id);
-    if (!btn) return;
-    if (active) {
-      btn.classList.add('active');
-      btn.textContent = '✏️ Карандаш вкл.';
-    } else {
-      btn.classList.remove('active');
-      btn.textContent = '✏️ Карандаш';
-    }
-  });
-}
+});
 
 // Управление с клавиатуры
 document.addEventListener('keydown', e => {
@@ -4230,15 +2416,11 @@ let duelOppLives = 3;
 let duelMyCorrect = 0;
 let duelOppCorrect = 0;
 let duelPlayer = null;       // 'p1' или 'p2'
-let duelOppUid = null;
-let duelOppName = null;
 let duelPuzzle = null;
 let duelSolution = null;
 let duelSelected = null;
 let duelMyRating = 1000;
 let duelOppRating = 1000;
-let duelPencilMode = false;
-let duelNotes = null;        // 9×9 массив массивов кандидатов
 
 const HEART = '❤️';
 const HEART_EMPTY = '🖤';
@@ -4272,11 +2454,7 @@ $('oppCorrect').textContent = hasOpp ? `${duelOppCorrect} верных` : 'пр�
 function renderDuelBoard() {
   const board = $('duelBoard');
   board.innerHTML = '';
-  if (!duelPuzzle || !duelBoard) { console.log('[SUDOKU] renderDuelBoard: нет данных, пропуск'); return; }
-  console.log('[SUDOKU] renderDuelBoard: fullBoard=', duelBoard.map(r=>r.join('')).join('|'), 'player=', duelPlayer);
-  // Инициализируем массив заметок под дуэль, если ещё нет
-  if (!duelNotes) duelNotes = Array.from({length:9}, () => Array.from({length:9}, () => []));
-  renderNumPad(); // обновить счётчики оставшихся цифр
+  if (!duelPuzzle || !duelBoard) return; // ждём данных
   const isP1 = duelPlayer === 'p1';
   for (let r = 0; r < 9; r++) {
     for (let c = 0; c < 9; c++) {
@@ -4297,19 +2475,14 @@ function renderDuelBoard() {
         // Не фиксированная — можно кликать всегда (даже если уже заполнена)
         cell.addEventListener('click', () => duelSelectCell(r, c));
         if (val !== 0) {
-          const isWrong = _duelFirstMoveDone && duelSolution && duelSolution[r][c] !== val;
+          const isWrong = duelSolution && duelSolution[r][c] !== val;
           cell.classList.add(isWrong ? 'error' : 'user');
           cell.textContent = val;
-        } else if (duelNotes && duelNotes[r] && duelNotes[r][c] && duelNotes[r][c].length) {
-          // Кандидаты (заметки карандаша)
-          cell.classList.add('notes');
-          cell.innerHTML = renderDuelNotesHTML(duelNotes[r][c]);
         }
       }
 
       if (duelSelected && duelSelected.r === r && duelSelected.c === c) {
         cell.style.background = 'var(--cell-selected-bg)';
-        cell.style.boxShadow = 'inset 0 0 0 3px var(--accent)';
       }
 
       board.appendChild(cell);
@@ -4319,79 +2492,23 @@ function renderDuelBoard() {
 }
 
 function duelSelectCell(r, c) {
-  // фиксированная из puzzle — нельзя трогать
-  if (duelPuzzle && duelPuzzle[r][c] !== 0) return;
-  // уже заполнена верно другим игроком — заблокирована
-  if (duelBoard && duelBoard[r][c] !== 0 && duelSolution && duelSolution[r][c] === duelBoard[r][c]) return;
+  // можно выбрать любую не-фиксированную клетку (включая с неверным ответом)
+  if (duelPuzzle && duelPuzzle[r][c] !== 0) return; // фиксированная
   duelSelected = { r, c };
   playClick();
   renderDuelBoard();
 }
 
 function highlightDuelSelection() {
-  const board = $('duelBoard');
-  if (!board) return;
-  // сначала убираем все highlights
-  for (let i = 0; i < 81; i++) board.children[i] && board.children[i].classList.remove('highlight');
   if (!duelSelected) return;
   const { r, c } = duelSelected;
+  const board = $('duelBoard');
   for (let i = 0; i < 81; i++) {
     const cell = board.children[i];
     const cr = Math.floor(i / 9), cc = i % 9;
     if (cr === r || cc === c || (Math.floor(cr/3)===Math.floor(r/3) && Math.floor(cc/3)===Math.floor(c/3))) {
       if (!(cr===r && cc===c)) cell.classList.add('highlight');
     }
-  }
-}
-
-// Обновляет DOM доски in-place — НЕ пересоздаёт элементы, чтобы event listeners не терялись
-function syncDuelBoardDOM() {
-  const board = $('duelBoard');
-  if (!board || !duelBoard) { console.log('[SUDOKU] syncDuelBoardDOM: пропуск, нет board или duelSolution'); return; }
-  console.log('[SUDOKU] syncDuelBoardDOM: board=', duelBoard.map(r=>r.join('')).join('|'), 'solution=', duelSolution ? 'есть' : 'null');
-  const isP1 = duelPlayer === 'p1';
-  for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
-      const i = r * 9 + c;
-      const cell = board.children[i];
-      if (!cell) continue;
-      const isFixed = duelPuzzle && duelPuzzle[r][c] !== 0;
-      if (isFixed) continue;
-      const val = duelBoard[r][c];
-      if (val === 0) {
-        cell.classList.remove('error', 'user');
-        cell.textContent = '';
-        // Если есть заметки — отобразить их
-        if (duelNotes && duelNotes[r] && duelNotes[r][c] && duelNotes[r][c].length) {
-          cell.innerHTML = renderDuelNotesHTML(duelNotes[r][c]);
-        }
-        continue;
-      }
-      // Свои ошибки — красным, свои верные — синим, чужие ходы — обычным синим
-      if (duelSolution[r][c] === val) {
-        cell.classList.remove('error');
-        cell.classList.add('user');
-      } else {
-        // Неверная цифра — красная только если это свой ход (был до sync)
-        // После первого своего хода новые ошибки тоже красные
-        cell.classList.add('error');
-        cell.classList.remove('user');
-      }
-      cell.textContent = val;
-      if (duelSelected && duelSelected.r === r && duelSelected.c === c) {
-        cell.style.background = 'var(--cell-selected-bg)';
-        cell.style.boxShadow = 'inset 0 0 0 3px var(--accent)';
-      } else {
-        cell.style.background = '';
-        cell.style.boxShadow = '';
-      }
-    }
-  }
-  highlightDuelSelection();
-  // Обновить счётчики "осталось" в numpad дуэли
-  for (let nn = 1; nn <= 9; nn++) {
-    const b = document.querySelector(`#duelNumPad .num-btn[data-n="${nn}"]`);
-    if (b) updateDuelNumRemaining(nn, b);
   }
 }
 
@@ -4402,43 +2519,16 @@ function duelPlaceNumber(n) {
   playClick();
 
   if (n === 0) {
-    // стереть (только свои ошибки + заметки)
+    // стереть (только свои ошибки)
     const fixed = duelPuzzle && duelPuzzle[r][c] !== 0;
-    if (!fixed) {
-      // стираем заметки
-      if (duelNotes && duelNotes[r] && duelNotes[r][c] && duelNotes[r][c].length) {
-        duelNotes[r][c] = [];
-        duelSelected = null;
-        renderDuelBoard();
-        renderNumPad();
-        return;
-      }
-      if (duelBoard[r][c] !== 0) {
-        duelBoard[r][c] = 0;
-        duelSelected = null;
-        renderDuelBoard();
-        renderNumPad();
-      }
+    if (!fixed && duelBoard[r][c] !== 0) {
+      duelBoard[r][c] = 0;
+      duelSelected = null;
+      renderDuelBoard();
     }
     return;
   }
 
-  // === РЕЖИМ КАРАНДАША В ДУЭЛИ ===
-  if (duelPencilMode && n >= 1 && n <= 9) {
-    const fixed = duelPuzzle && duelPuzzle[r][c] !== 0;
-    const filled = duelBoard[r][c] !== 0;
-    if (fixed || filled) return; // заметки только в пустых клетках
-    if (!duelNotes) duelNotes = Array.from({length:9}, () => Array.from({length:9}, () => []));
-    const notes = duelNotes[r][c];
-    const idx = notes.indexOf(n);
-    if (idx >= 0) notes.splice(idx, 1);
-    else notes.push(n);
-    renderDuelBoard();
-    renderNumPad();
-    return;
-  }
-
-  _duelFirstMoveDone = true;
   const isCorrect = duelSolution[r][c] === n;
 
   if (!isCorrect) {
@@ -4447,29 +2537,19 @@ function duelPlaceNumber(n) {
     playWrong();
     // неверный ответ — всё равно отправляем и рисуем на доске
     duelBoard[r][c] = n;
-    // Чистим заметки — клетка теперь занята
-    if (duelNotes && duelNotes[r]) duelNotes[r][c] = [];
     window.FB.sendDuelMove(duelCode, r, c, n, false);
   } else {
     duelMyCorrect++;
     flashCorrect();
     playCorrect();
     duelBoard[r][c] = n;
-    // Чистим заметки — цифра поставлена
-    if (duelNotes && duelNotes[r]) duelNotes[r][c] = [];
     window.FB.sendDuelMove(duelCode, r, c, n, true);
   }
 
   duelSelected = null;
   renderDuelBoard();
-  renderNumPad();
-  // Обновить numpad дуэли (счётчики оставшихся)
-  for (let nn = 1; nn <= 9; nn++) {
-    const b = document.querySelector(`#duelNumPad .num-btn[data-n="${nn}"]`);
-    if (b) updateDuelNumRemaining(nn, b);
-  }
 
-  // Проверка: победил или потерял все жизни
+  // Проверка:赢了 или потерял все жизни
   if (duelMyLives <= 0) {
     duelMyLives = 0;
     window.FB.duelLose(duelCode);
@@ -4489,60 +2569,29 @@ function checkDuelWin() {
 }
 
 async function endDuelGame(result) {
-  if (_duelEnded) { console.log('[SUDOKU] endDuelGame: уже завершено, пропуск'); return; }
-  _duelEnded = true;
-  console.log('[SUDOKU] endDuelGame START: result=', result,
-    'duelOppUid=', duelOppUid, 'duelOppName=', duelOppName,
-    'duelMyRating=', duelMyRating, 'duelOppRating=', duelOppRating);
-
-  // ВАЖНО: сохраняем значения ДО duelCleanup, иначе он сбросит duelOppUid в null
-  const oppUid = duelOppUid;
-  const oppName = duelOppName;
-  const myR = duelMyRating;
-  const oppR = duelOppRating;
-  const isWin = (result === 'win' || result === 'quit_win');
-  console.log('[SUDOKU] endDuelGame: сохранено oppUid=', oppUid, 'oppName=', oppName,
-    'myR=', myR, 'oppR=', oppR, 'isWin=', isWin);
-
   if (duelUnsub) { duelUnsub(); duelUnsub = null; }
   stopDuelTimer();
   duelCleanup(); // скрываем duel screen
 
-  // ELO формула: K=20 (или 30 для быстрой сходимости)
-  // Expected = 1 / (1 + 10^((opp - me)/400))
-  // Delta = round(K * (actual - expected))
-  // Победа над сильным: больше +. Поражение слабому: больше -.
-  // Поражение сильному: меньше -. Победа над слабым: меньше +.
-  const K = 30;
-  const expected = 1 / (1 + Math.pow(10, (oppR - myR) / 400));
-  const actual = isWin ? 1 : 0;
-  const delta = Math.round(K * (actual - expected));
-  console.log('[SUDOKU] ELO: myR=', myR, 'oppR=', oppR, 'expected=', expected.toFixed(3),
-    'actual=', actual, 'delta=', delta);
+  const delta = Math.round(20 + Math.abs(duelOppRating - duelMyRating) * 0.05);
   let msg = '';
-  // ВАЖНО: обновляем ТОЛЬКО СВОЙ рейтинг — каждый игрок сам считает свой delta.
-  // В ELO delta_A = -delta_B, поэтому если оба игрока обновят только себя,
-  // получится ровно нужный zero-sum.
-  // delta УЖЕ содержит правильный знак для self: положительный при победе, отрицательный при поражении.
-  try {
-    await window.FB.upsertRating(delta, null, null);
-    if (result === 'win') msg = `🎉 Победа! +${delta} рейтинга`;
-    else if (result === 'lose') msg = `💔 Поражение! -${Math.abs(delta)} рейтинга`;
-    else if (result === 'quit_win') msg = `🎉 Соперник сдался! +${delta} рейтинга`;
-    else msg = `💔 Ты сдался! -${Math.abs(delta)} рейтинга`;
-  } catch(e) {
-    console.error('[SUDOKU] upsertRating failed:', e);
-    msg = isWin ? `🎉 Победа! (+${delta} рейтинга, запись в базу ошибка)` : `💔 Поражение! (-${Math.abs(delta)} рейтинга, запись в базу ошибка)`;
+  if (result === 'win') {
+    // только победитель пишет рейтинг (один раз)
+    await window.FB.upsertRating(delta);
+    await window.FB.upsertRating(-delta);
+    msg = `🎉 Победа! +${delta} рейтинга`;
+  } else if (result === 'lose') {
+    // проигравший НЕ пишет рейтинг — победитель уже записал
+    msg = `💔 Поражение! -${delta} рейтинга`;
+  } else {
+    msg = '⚠️ Соперник сдался';
   }
-
-  // delta уже содержит правильный знак для self
-  const myNewR = myR + delta;
 
   const modal = $('modalContent');
   modal.innerHTML = `
     <div class="duel-modal-step">
       <h2>${msg}</h2>
-      <div class="modal-sub">Твой рейтинг: ${myNewR} (${delta >= 0 ? '+' : ''}${delta})</div>
+      <div class="modal-sub">Твой рейтинг: ${result === 'win' ? duelMyRating + delta : duelMyRating - delta}</div>
       <div class="modal-actions">
         <button class="btn primary" id="duelEndNewBtn">⚔️ Ещё дуэль</button>
         <button class="btn ghost" id="duelEndHomeBtn">🏠 В меню</button>
@@ -4550,11 +2599,8 @@ async function endDuelGame(result) {
     </div>
   `;
   showModal();
-  const newBtn = $('duelEndNewBtn');
-  const homeBtn = $('duelEndHomeBtn');
-  console.log('[SUDOKU] endDuelGame: newBtn=', newBtn, 'homeBtn=', homeBtn);
-  if (newBtn) newBtn.addEventListener('click', () => { hideModal(); showDuelMenu(); });
-  if (homeBtn) homeBtn.addEventListener('click', () => { hideModal(); showLevelScreen(); });
+  $('duelEndNewBtn').addEventListener('click', () => { hideModal(); showDuelMenu(); });
+  $('duelEndHomeBtn').addEventListener('click', () => { hideModal(); showLevelScreen(); duelCleanup(); });
 
   duelCode = null;
 }
@@ -4571,101 +2617,40 @@ function forceHideModal() {
 
 function duelCleanup() {
   if (duelUnsub) { duelUnsub(); duelUnsub = null; }
-  if (duelCode) { // не чистим если уже чистили
-    duelCode = null; duelBoard = null; duelSelected = null;
-    duelMyLives = 3; duelOppLives = 3;
-    duelMyCorrect = 0; duelOppCorrect = 0;
-    duelOppUid = null; duelOppName = null;
-    _duelApplied = false;
-    _duelEnded = false;
-    _duelFirstMoveDone = false;
-    window._mmInProgress = false;
-    const autoBtn = $('duelAutoBtn');
-    if (autoBtn) { autoBtn.disabled = false; autoBtn.textContent = '🔍 Найти случайного соперника'; }
-    $('duelScreen').classList.add('hidden');
-  }
+  duelCode = null; duelBoard = null; duelSelected = null;
+  duelMyLives = 3; duelOppLives = 3;
+  duelMyCorrect = 0; duelOppCorrect = 0;
+  $('duelScreen').classList.add('hidden');
 }
 
 // Применяет данные комнаты: инициализация или sync
 console.log('[SUDOKU] _applyDuelRoom определена');
-let _duelApplied = false; // guard: не применяем twice
-let _duelEnded = false;   // guard: не показываем результат twice
-let _duelFirstMoveDone = false; // показываем ошибки только после первого хода
 function _applyDuelRoom(room) {
-  // Защита: если уже инициализированы — только обновляем HUD, не пересоздаём DOM
   const myUid = window.FB.getMyUid();
   const isP1 = room.player1_uid === myUid;
-  const firstTime = !_duelApplied;
+  const firstTime = !duelPuzzle;
 
-  console.log('[SUDOKU] _applyDuelRoom:', firstTime ? 'FIRST' : 'SYNC',
-    'solution=', room.solution ? 'есть' : 'NULL!',
-    'board=', room.board ? 'есть(' + room.board.length + ')' : 'NULL!',
-    'puzzle=', room.puzzle ? 'есть' : 'NULL!');
+  duelPuzzle = room.puzzle;
+  duelSolution = room.solution;
+  duelPlayer = isP1 ? 'p1' : 'p2';
+  duelMyRating = isP1 ? (room.player1_rating || 1000) : (room.player2_rating || 1000);
+  duelOppRating = isP1 ? (room.player2_rating || 1000) : (room.player1_rating || 1000);
+  duelBoard = (Array.isArray(room.board) && room.board[0]) ? room.board.map(r => r.slice()) : room.puzzle.map(r => r.slice());
+  duelMyCorrect = isP1 ? (room.player1_correct || 0) : (room.player2_correct || 0);
+  duelOppCorrect = isP1 ? (room.player2_correct || 0) : (room.player1_correct || 0);
+  const myErr = isP1 ? (room.player1_errors || 0) : (room.player2_errors || 0);
+  const oppErr = isP1 ? (room.player2_errors || 0) : (room.player1_errors || 0);
+  duelMyLives = 3 - myErr;
+  duelOppLives = 3 - oppErr;
 
-  if (firstTime) {
-    _duelApplied = true;
-    console.log('[SUDOKU] _applyDuelRoom(firstTime): myUid=', myUid, 'room.p1=', room.player1_uid, 'room.p2=', room.player2_uid);
-    duelPuzzle = parseBoard(room.puzzle) || room.puzzle;
-    duelSolution = parseBoard(room.solution) || room.solution;
-    if (!duelSolution) {
-      // solution не пришла с Supabase — берём из board (если board == puzzle в начале,
-      // значит ходов ещё не было и board по сути = puzzle = частично заполненный)
-      console.warn('[SUDOKU] solution отсутствует в Supabase! Берём из board.');
-      duelSolution = parseBoard(room.board);
-    }
-    if (!duelSolution) console.error('[SUDOKU] _applyDuelRoom: duelSolution ВСЁ ЕЩЁ NULL!');
-    duelPlayer = isP1 ? 'p1' : 'p2';
-    duelOppUid = isP1 ? room.player2_uid : room.player1_uid;
-    duelOppName = isP1 ? room.player2_name : room.player1_name;
-    duelMyRating = isP1 ? Number(room.player1_rating || 1000) : Number(room.player2_rating || 1000);
-    duelOppRating = isP1 ? Number(room.player2_rating || 1000) : Number(room.player1_rating || 1000);
-    duelBoard = parseBoard(room.board) || parseBoard(room.puzzle) || (room.puzzle ? room.puzzle.map(r => r.slice()) : null);
-    duelMyCorrect = Number(isP1 ? (room.player1_correct || 0) : (room.player2_correct || 0));
-    duelOppCorrect = Number(isP1 ? (room.player2_correct || 0) : (room.player1_correct || 0));
-    const myErr = Number(isP1 ? (room.player1_errors || 0) : (room.player2_errors || 0));
-    const oppErr = Number(isP1 ? (room.player2_errors || 0) : (room.player1_errors || 0));
-    duelMyLives = Math.max(0, 3 - myErr);
-    duelOppLives = Math.max(0, 3 - oppErr);
-    console.log('[SUDOKU] _applyDuelRoom: myLives=', duelMyLives, 'oppLives=', duelOppLives,
-      'myCorrect=', duelMyCorrect, 'oppCorrect=', duelOppCorrect,
-      'duelSolution=', duelSolution ? 'есть' : 'NULL!',
-      'duelPuzzle=', duelPuzzle ? 'есть' : 'NULL!',
-      'duelBoard=', duelBoard ? 'есть' : 'NULL!');
-
-    renderDuelBoard();
-    renderDuelNumPad();
-    startDuelTimer();
-    updateDuelHUD(room);
-    updatePencilBtn(); // обновить кнопку карандаша (сбросить если была активна)
-    updateDuelPencilBtn();
-  } else {
-    // Sync: обновляем lives и opponent's ходы в DOM без пересоздания доски
-    duelMyCorrect = Number(isP1 ? (room.player1_correct || 0) : (room.player2_correct || 0));
-    duelOppCorrect = Number(isP1 ? (room.player2_correct || 0) : (room.player1_correct || 0));
-    const myErr = Number(isP1 ? (room.player1_errors || 0) : (room.player2_errors || 0));
-    const oppErr = Number(isP1 ? (room.player2_errors || 0) : (room.player1_errors || 0));
-    duelMyLives = Math.max(0, 3 - myErr);
-    duelOppLives = Math.max(0, 3 - oppErr);
-    // Парсим board из Supabase если пришёл
-    const newBoard = parseBoard(room.board);
-    if (newBoard) {
-      duelBoard = newBoard;
-      console.log('[SUDOKU] SYNC: duelBoard обновлён:', duelBoard.map(r=>r.join('')).join('|'));
-    }
-    updateDuelHUD(room);
-    syncDuelBoardDOM();
-  }
+  renderDuelBoard();
+  renderDuelNumPad();
+  if (firstTime) startDuelTimer();
+  updateDuelHUD(room);
 }
 
-async function initDuelGame(code, initialRoomData) {
-  console.log('[SUDOKU] initDuelGame вызван с кодом', code, 'via initDuelGame');
-  // Защита: если мы уже в другой игре — игнорируем второй вызов
-  if (duelCode && duelCode !== code) {
-    console.log('[SUDOKU] initDuelGame: уже в игре', duelCode, ', пропускаем', code);
-    return;
-  }
-  _duelApplied = false;
-  _duelFirstMoveDone = false;
+function initDuelGame(code, initialRoomData) {
+  console.log('[SUDOKU] initDuelGame вызван с кодом', code);
   duelCode = code;
   duelMyLives = 3; duelOppLives = 3;
   duelMyCorrect = 0; duelOppCorrect = 0;
@@ -4677,60 +2662,50 @@ async function initDuelGame(code, initialRoomData) {
   $('gameScreen').classList.add('hidden');
   $('duelScreen').classList.remove('hidden');
 
-          // Приоритет: переданные данные > localStorage > polling
-          // Для creator: localStorage может быть пуст если joiner ещё не записал — ждём до 2 сек
-  let roomData = initialRoomData;
-  if (!roomData) {
-    const localRaw = localStorage.getItem('sudoku_room_' + code);
-    roomData = localRaw ? JSON.parse(localRaw) : null;
-    if (!roomData) {
-      for (let i = 0; i < 8; i++) {
-        await new Promise(r => setTimeout(r, 250));
-        const retry = localStorage.getItem('sudoku_room_' + code);
-        if (retry) { roomData = JSON.parse(retry); break; }
-      }
-    }
-  }
-  console.log('[SUDOKU] initDuelGame:', code,
-    'initial=', initialRoomData ? 'есть' : 'нет',
-    'roomData=', roomData ? 'есть' : 'нет',
-    'puzzle=', roomData && roomData.puzzle ? 'есть' : 'НЕТ',
-    'solution=', roomData && roomData.solution ? 'есть' : 'НЕТ');
-  // Унифицированный колбэк: всегда один watchDuelRoom
-  const duelCallback = room => {
-    if (!room) return;
-    if (room.status === 'waiting' && !room.player2_uid) { updateDuelHUD(room); return; }
-    // HUD обновляется при ЛЮБОМ обновлении комнаты (жизни, очки, opponent info)
-    if (room.puzzle) {
-      if (!_duelApplied || !_duelEnded) {
-        _applyDuelRoom(room);
-      }
-    }
-    // Обработка конца игры — работает даже если _duelEnded уже true
-    if (!_duelEnded && (room.status === 'p1_won' || room.status === 'p2_won')) {
-      const iWon = (room.status === 'p1_won' && duelPlayer === 'p1') || (room.status === 'p2_won' && duelPlayer === 'p2');
-      console.log('[SUDOKU] game end detected! status=', room.status, 'duelPlayer=', duelPlayer, 'iWon=', iWon);
-      endDuelGame(iWon ? 'win' : 'lose');
-    } else if (!_duelEnded && (room.status === 'p1_quit' || room.status === 'p2_quit')) {
-      console.log('[SUDOKU] quit detected! status=', room.status, 'duelPlayer=', duelPlayer);
-      const oppQuit = (room.status === 'p1_quit' && duelPlayer === 'p2') || (room.status === 'p2_quit' && duelPlayer === 'p1');
-      console.log('[SUDOKU] oppQuit=', oppQuit, '-> calling endDuelGame');
-      endDuelGame(oppQuit ? 'quit_win' : 'lose');
-    }
-  };
-
+  // Приоритет: переданные данные > localStorage > polling
+  const localRaw = localStorage.getItem('sudoku_room_' + code);
+  const roomData = initialRoomData || (localRaw ? JSON.parse(localRaw) : null);
   if (roomData && roomData.puzzle && roomData.player1_uid && roomData.player2_uid && roomData.status === 'playing') {
-    // Есть данные сразу (localStorage или переданные) — применяем и начинаем следить
     _applyDuelRoom(roomData);
-    duelUnsub = window.FB.watchDuelRoom(code, duelCallback);
+    duelUnsub = window.FB.watchDuelRoom(code, room2 => {
+      if (!room2) return;
+      _applyDuelRoom(room2);
+      if (room2.status === 'p1_won' || room2.status === 'p2_won') {
+        const iWon = (room2.status === 'p1_won' && duelPlayer === 'p1') || (room2.status === 'p2_won' && duelPlayer === 'p2');
+        endDuelGame(iWon ? 'win' : 'lose');
+      } else if (room2.status === 'p1_quit' || room2.status === 'p2_quit') {
+        const oppQuit = (room2.status === 'p1_quit' && duelPlayer === 'p2') || (room2.status === 'p2_quit' && duelPlayer === 'p1');
+        endDuelGame(oppQuit ? 'win' : 'lose');
+      }
+    });
     return;
   }
 
-  // Нет данных — показываем ожидание и ждём через polling
+  // Не получилось — показываем ожидание и поллим
   const board = $('duelBoard');
   board.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--text-dim);font-size:1.1rem;">⏳ Ожидание соперника...</div>';
   $('duelNumPad').innerHTML = '';
-  duelUnsub = window.FB.watchDuelRoom(code, duelCallback);
+
+  duelUnsub = window.FB.watchDuelRoom(code, room => {
+    if (!room) return;
+    if (room.status === 'waiting' && !room.player2_uid) { updateDuelHUD(room); return; }
+    if (room.status === 'playing' && room.puzzle && room.player1_uid && room.player2_uid) {
+      _applyDuelRoom(room);
+    } else {
+      _applyDuelRoom(room);
+    }
+    if (room.status === 'p1_won' || room.status === 'p2_won') {
+      const myUid = window.FB.getMyUid();
+      const isP1 = room.player1_uid === myUid;
+      const iWon = (room.status === 'p1_won' && duelPlayer === 'p1') || (room.status === 'p2_won' && duelPlayer === 'p2');
+      endDuelGame(iWon ? 'win' : 'lose');
+    } else if (room.status === 'p1_quit' || room.status === 'p2_quit') {
+      const myUid = window.FB.getMyUid();
+      const isP1 = room.player1_uid === myUid;
+      const oppQuit = (room.status === 'p1_quit' && duelPlayer === 'p2') || (room.status === 'p2_quit' && duelPlayer === 'p1');
+      endDuelGame(oppQuit ? 'win' : 'lose');
+    }
+  });
 }
 
 function renderDuelNumPad() {
@@ -4739,27 +2714,10 @@ function renderDuelNumPad() {
   for (let n = 1; n <= 9; n++) {
     const btn = document.createElement('button');
     btn.className = 'num-btn';
-    btn.innerHTML = `<span class="num-digit">${n}</span><span class="num-remaining" id="duelNumRemain${n}"></span>`;
-    btn.dataset.n = n;
-    updateDuelNumRemaining(n, btn);
+    btn.textContent = n;
     btn.addEventListener('click', () => { playClick(); duelPlaceNumber(n); });
     pad.appendChild(btn);
   }
-}
-
-function updateDuelNumRemaining(n, btn) {
-  const el = btn.querySelector('.num-remaining') || document.getElementById('duelNumRemain' + n);
-  if (!el) return;
-  let placed = 0;
-  if (duelBoard && duelSolution) {
-    for (let r = 0; r < 9; r++)
-      for (let c = 0; c < 9; c++)
-        if (duelBoard[r][c] === n && duelSolution[r][c] === n) placed++;
-  }
-  const remaining = 9 - placed;
-  el.textContent = remaining > 0 ? remaining : '✓';
-  if (remaining === 0) el.classList.add('done');
-  else el.classList.remove('done');
 }
 
 // Dukальный таймер для дуэли
@@ -4798,8 +2756,7 @@ async function showDuelMenu() {
   forceHideModal();
   const myRating = await window.FB.getMyRating();
   duelMyRating = myRating?.rating || 1000;
-  // Имя: из Google аккаунта или из localStorage
-  const myName = window.FB.getMyName() || localStorage.getItem('sudoku_duel_name') || '';
+  const myName = localStorage.getItem('sudoku_duel_name') || '';
 
   const modal = $('modalContent');
   modal.innerHTML = `
@@ -4829,7 +2786,6 @@ async function showDuelMenu() {
   $('duelCreateBtn').addEventListener('click', async () => {
     console.log('[SUDOKU] A: duelCreateBtn нажат');
     const name = ($('duelNameInput').value.trim() || 'Игрок').slice(0, 20);
-    if (await window.FB?.isBanned?.()) { alert('⛔ Вы заблокированы и не можете создавать дуэли.'); return; }
     window.FB.setMyName(name);
     hideModal();
     const { puzzle, solution } = generatePuzzle(30);
@@ -4845,7 +2801,6 @@ async function showDuelMenu() {
     const name = ($('duelNameInput').value.trim() || 'Игрок').slice(0, 20);
     const code = $('duelJoinInput').value.trim().toUpperCase();
     if (!code) { alert('Введи код комнаты!'); return; }
-    if (await window.FB?.isBanned?.()) { alert('⛔ Вы заблокированы и не можете присоединяться к дуэлям.'); return; }
     window.FB.setMyName(name);
     hideModal();
     const result = await window.FB.joinDuelRoom(code, name);
@@ -4859,26 +2814,13 @@ async function showDuelMenu() {
   });
 
   $('duelAutoBtn').addEventListener('click', async () => {
-    const btn = $('duelAutoBtn');
-    if (btn.disabled) return;
-    btn.disabled = true;
-    const origText = btn.textContent;
-    btn.textContent = '⏳ Ищем соперника...';
-    // Проверка бана ДО показа модалки поиска
-    if (await window.FB?.isBanned?.()) {
-      btn.disabled = false;
-      btn.textContent = origText;
-      alert('⛔ Вы заблокированы и не можете участвовать в дуэлях.');
-      return;
-    }
-    // Имя читаем ДО showMatchmakingModal (modalContent будет очищен)
-    const nameInput = $('duelNameInput');
-    const name = (nameInput ? nameInput.value.trim() : '' || 'Игрок').slice(0, 20);
+    const name = ($('duelNameInput').value.trim() || 'Игрок').slice(0, 20);
     window.FB.setMyName(name);
-    showMatchmakingModal(name, () => {
-      // callback вызовется когда matchmaking завершится (успех или отмена)
-      btn.disabled = false;
-      btn.textContent = '🔍 Найти случайного соперника';
+    hideModal();
+    showMatchmakingModal();
+    await window.FB.joinQueue(name, duelMyRating, code => {
+      forceHideModal();
+      initDuelGame(code);
     });
   });
 }
@@ -4938,7 +2880,7 @@ function showWaitingModal(name, code) {
   });
 }
 
-function showMatchmakingModal(name, onCleanup) {
+function showMatchmakingModal() {
   forceHideModal();
   const modal = $('modalContent');
   modal.innerHTML = `
@@ -4957,15 +2899,12 @@ function showMatchmakingModal(name, onCleanup) {
     window.FB.leaveQueue();
     hideModal();
     showDuelMenu();
-    if (onCleanup) onCleanup();
   });
 
-  // Единственный вызов joinQueue — здесь, один раз
-  window.FB.joinQueue(name, duelMyRating, (roomCode, roomData) => {
-    console.log('[SUDOKU] auto-match: нашли соперника, комната', roomCode);
+  window.FB.joinQueue('', duelMyRating, (code, roomData) => {
+    console.log('[SUDOKU] auto-match: нашли соперника, комната', code);
     forceHideModal();
-    initDuelGame(roomCode, roomData);
-    if (onCleanup) onCleanup();
+    initDuelGame(code, roomData);
   });
 }
 
