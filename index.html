@@ -392,12 +392,13 @@
   let _heartbeatInterval = null;
   async function heartbeat() {
     if (!sbOk || !myUid) return;
-    // Только авторизованные пользователи попадают в рейтинг
-    if (!currentUser) return;
+    // Проверяем что залогинен (currentUser или любая сессия в localStorage)
+    const u = currentUser || _readSession();
+    if (!u) return;
     // Проверяем бан
     if (await isBanned()) return;
     try {
-      const name = myName || currentUser.user_metadata?.name || currentUser.email?.split('@')[0] || 'Игрок';
+      const name = myName || u.user_metadata?.name || u.email?.split('@')[0] || 'Игрок';
       await sbUpsert('duel_ratings', {
         uid: myUid,
         name,
@@ -1537,9 +1538,7 @@
     <div style="display:flex;gap:6px;">
       <button class="btn icon-btn auth-btn" id="authBtn" title="Войти">👤</button>
       <button class="btn icon-btn" id="adminBtn" title="Админка" style="display:none" onclick="showAdminPanel()">⚙️</button>
-      <button class="btn icon-btn" id="lvlThemeBtn" title="Сменить тему">🌙</button>
-      <button class="btn icon-btn" id="lvlSoundBtn" title="Звук вкл/выкл">🔊</button>
-      <button class="btn icon-btn vib-btn" id="lvlVibBtn" title="Вибрация вкл/выкл">📳</button>
+      <button class="btn icon-btn" id="settingsBtn" title="Настройки">🛠</button>
     </div>
   </div>
   <h2>Выбери уровень сложности</h2>
@@ -1571,7 +1570,6 @@
     <button class="btn duel-btn" id="showDuelBtn">⚔️ Дуэль</button>
     <button class="btn ghost" id="showRecordsBtn">🏆 Таблица рекордов</button>
     <button class="btn ghost" id="showDuelRatingsBtn">📊 Рейтинг дуэлей</button>
-    <button class="btn ghost" id="showFeedbackBtn">📨 Сообщить о баге</button>
   </div>
   <div class="footer">Игра автоматически сохраняет прогресс в этом браузере</div>
 </div>
@@ -1580,8 +1578,7 @@
 <div id="gameScreen" class="screen game-screen hidden">
   <div class="topbar">
     <div class="topbar-left">
-      <button class="btn icon-btn" id="themeBtn" title="Сменить тему">🌙</button>
-      <button class="btn icon-btn" id="soundBtn" title="Звук вкл/выкл">🔊</button>
+      <button class="btn icon-btn" id="gameSettingsBtn" title="Настройки">🛠</button>
       <button class="btn icon-btn auth-btn" id="gameAuthBtn" title="Войти">👤</button>
     </div>
     <div class="topbar-center">
@@ -1648,6 +1645,7 @@
   <div class="num-pad" id="duelNumPad"></div>
   <div class="controls">
     <button class="btn icon-btn auth-btn" id="duelAuthBtn" title="Войти">👤</button>
+    <button class="btn icon-btn" id="duelSettingsBtn" title="Настройки">🛠</button>
     <button class="btn ghost" id="duelPencilBtn">✏️ Карандаш</button>
     <button class="btn ghost" id="duelQuitBtn" style="pointer-events:auto;z-index:10;position:relative;">✕ Выйти</button>
   </div>
@@ -4634,6 +4632,72 @@ async function showAdminUsers() {
 }
 
 // ─── Модалка «Сообщить о баге/идее» для пользователей ───
+// === Меню настроек ===
+function showSettingsModal() {
+  const modal = $('modalContent');
+  const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const vibSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
+  modal.innerHTML = `
+    <h2>🛠 Настройки</h2>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-soft);padding:14px 16px;border-radius:10px;">
+        <div>
+          <div style="font-weight:600;">🌙 Тема</div>
+          <div style="color:var(--text-dim);font-size:0.82rem;">${currentTheme === 'light' ? 'Светлая' : 'Тёмная'}</div>
+        </div>
+        <button class="btn ${currentTheme === 'light' ? 'primary' : 'ghost'}" id="setThemeLight" style="padding:6px 12px;font-size:0.85rem;">☀️</button>
+        <button class="btn ${currentTheme === 'dark' ? 'primary' : 'ghost'}" id="setThemeDark" style="padding:6px 12px;font-size:0.85rem;">🌙</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-soft);padding:14px 16px;border-radius:10px;">
+        <div>
+          <div style="font-weight:600;">🔊 Звук</div>
+          <div style="color:var(--text-dim);font-size:0.82rem;">${soundEnabled ? 'Включён' : 'Выключен'}</div>
+        </div>
+        <button class="btn ${soundEnabled ? 'primary' : 'ghost'}" id="setSoundToggle" style="padding:6px 14px;font-size:0.85rem;">${soundEnabled ? '🔊 Вкл' : '🔇 Выкл'}</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-soft);padding:14px 16px;border-radius:10px;${vibSupported ? '' : 'opacity:0.4;'}">
+        <div>
+          <div style="font-weight:600;">📳 Вибрация</div>
+          <div style="color:var(--text-dim);font-size:0.82rem;">${vibSupported ? (vibrationEnabled ? 'Включена' : 'Выключена') : 'Не поддерживается'}</div>
+        </div>
+        <button class="btn ${vibrationEnabled ? 'primary' : 'ghost'}" id="setVibToggle" style="padding:6px 14px;font-size:0.85rem;" ${vibSupported ? '' : 'disabled'}>${vibrationEnabled ? '📳 Вкл' : '📴 Выкл'}</button>
+      </div>
+      <button class="btn ghost" id="setFeedbackBtn" style="width:100%;padding:14px;text-align:left;font-size:1rem;">📨 Сообщить о баге / идею</button>
+    </div>
+    <button class="btn ghost" id="settingsCloseBtn" style="width:100%;margin-top:16px;">Закрыть</button>
+  `;
+  showModal();
+  playClick?.();
+
+  $('setThemeLight')?.addEventListener('click', () => {
+    document.documentElement.setAttribute('data-theme', 'light');
+    localStorage.setItem('sudoku_theme', 'light');
+    playClick?.();
+    showSettingsModal();
+  });
+  $('setThemeDark')?.addEventListener('click', () => {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    localStorage.setItem('sudoku_theme', 'dark');
+    playClick?.();
+    showSettingsModal();
+  });
+  $('setSoundToggle')?.addEventListener('click', () => {
+    toggleSound();
+    playClick?.();
+    showSettingsModal();
+  });
+  $('setVibToggle')?.addEventListener('click', () => {
+    toggleVibration();
+    playClick?.();
+    showSettingsModal();
+  });
+  $('setFeedbackBtn')?.addEventListener('click', () => {
+    hideModal();
+    setTimeout(() => showFeedbackModal(), 200);
+  });
+  $('settingsCloseBtn')?.addEventListener('click', () => hideModal());
+}
+
 function showFeedbackModal() {
   const user = window.FB?.getCurrentUser();
   const myName = window.FB?.getMyName() || '';
@@ -4872,6 +4936,9 @@ document.addEventListener('click', async e => {
 }, true); // capture phase
 
 // Переключатели темы и звука
+$('settingsBtn')?.addEventListener('click', showSettingsModal);
+$('gameSettingsBtn')?.addEventListener('click', showSettingsModal);
+$('duelSettingsBtn')?.addEventListener('click', showSettingsModal);
 $('themeBtn')?.addEventListener('click', () => { toggleTheme(); playClick(); });
 
 // Клик ВНЕ активных элементов игры = снять выделение (capture phase — срабатывает раньше других обработчиков)
