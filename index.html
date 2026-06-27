@@ -38,7 +38,7 @@
       supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       console.log('[SUDOKU] Supabase client created');
 
-      supabase.auth.onAuthStateChange((event, session) => {
+      supabase.auth.onAuthStateChange(async (event, session) => {
         console.log('[SUDOKU] Auth event:', event, session ? 'session exists' : 'no session');
         if (session && session.user) {
           currentUser = session.user;
@@ -47,6 +47,16 @@
           console.log('[SUDOKU] Logged in as:', myUid, session.user.email);
           // Загружаем рейтинг из профиля
           loadMyRating();
+          // Upsert в таблицу users (uid, email, name)
+          try {
+            const email = session.user.email || '';
+            const name = session.user.user_metadata?.name || email.split('@')[0] || '?';
+            await fetch(_SB_REST + '/users', {
+              method: 'POST',
+              headers: { ..._SB_HDR, 'Prefer': 'resolution=merge-duplicates' },
+              body: JSON.stringify({ uid: myUid, email, name, last_seen: new Date().toISOString() })
+            });
+          } catch (e) { console.warn('[SUDOKU] users upsert failed:', e); }
         } else {
           currentUser = null;
           // Если нет анонимного UID — создаём
@@ -3189,6 +3199,7 @@ async function showAdminPanel() {
         <button class="btn primary" id="adminTabRatings" style="flex:1;min-width:80px">⚔️ Рейтинг</button>
         <button class="btn primary" id="adminTabRooms" style="flex:1;min-width:80px">🎮 Дуэли</button>
         <button class="btn primary" id="adminTabFeedback" style="flex:1;min-width:80px">📨 Связь</button>
+        <button class="btn primary" id="adminTabUsers" style="flex:1;min-width:80px">👥 Юзеры</button>
       </div>
       <div id="adminSection" style="text-align:left;margin:8px 0;">
         <div style="color:var(--text-dim)">Выберите раздел</div>
@@ -3235,6 +3246,7 @@ async function showAdminPanel() {
   wireAdminTab('adminTabRooms', showAdminRooms);
   wireAdminTab('adminTabMonitor', showAdminMonitor);
   wireAdminTab('adminTabFeedback', showAdminFeedback);
+  wireAdminTab('adminTabUsers', showAdminUsers);
 
   function stopAdminTimer() {
     if (_adminRefreshTimer) { clearInterval(_adminRefreshTimer); _adminRefreshTimer = null; }
@@ -4186,6 +4198,48 @@ async function showAdminFeedback() {
   refreshBtn.style.textAlign = 'left';
   refreshBtn.textContent = '🔄 Обновить';
   refreshBtn.addEventListener('click', showAdminFeedback);
+  actionsDiv.appendChild(refreshBtn);
+}
+
+// ─── Раздел «Пользователи» (таблица users) ───
+async function showAdminUsers() {
+  const section = document.getElementById('adminSection');
+  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загружаю...</div>';
+  const actionsDiv = document.getElementById('adminActions');
+  actionsDiv.innerHTML = '';
+
+  let users = [];
+  try {
+    const r = await fetch(_SB_REST + '/users?order=last_seen.desc&limit=500', { headers: _SB_HDR, cache: 'no-store' });
+    if (r.ok) users = await r.json();
+  } catch (e) {}
+
+  if (!users.length) {
+    section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Пользователей пока нет. Таблица заполняется автоматически при входе.</div>';
+    return;
+  }
+
+  const q = (prompt('Поиск по email или нику (Enter = показать всех):') || '').toLowerCase().trim();
+  const filtered = q ? users.filter(u => (u.email||'').toLowerCase().includes(q) || (u.name||'').toLowerCase().includes(q)) : users;
+
+  let html = `<div style="color:var(--text-dim);font-size:0.78rem;margin-bottom:6px;">Всего: ${users.length}${q ? ` · Найдено: ${filtered.length}` : ''}</div>`;
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 80px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span>Ник</span><span>Email</span><span>Зашёл</span></div>';
+  for (const u of filtered) {
+    const last = u.last_seen ? new Date(u.last_seen).toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+    const isAnonUid = !u.uid || u.uid.indexOf('-') === -1;
+    html += `<div style="display:grid;grid-template-columns:1fr 1fr 80px;gap:6px;font-size:0.85rem;padding:6px 4px;border-bottom:1px solid rgba(255,255,255,0.05);">
+      <span><b>${escapeHtml(u.name || '?')}</b>${isAnonUid ? ' <span style="font-size:0.7rem;color:var(--text-dim);">[анон]</span>' : ''}</span>
+      <span style="color:var(--text-dim);word-break:break-all;font-size:0.8rem;">${escapeHtml(u.email || '—')}</span>
+      <span style="color:var(--text-dim);font-size:0.78rem;">${last}</span>
+    </div>`;
+  }
+  section.innerHTML = html;
+
+  const refreshBtn = document.createElement('button');
+  refreshBtn.className = 'btn ghost';
+  refreshBtn.style.textAlign = 'left';
+  refreshBtn.textContent = '🔄 Обновить / Поиск';
+  refreshBtn.addEventListener('click', showAdminUsers);
   actionsDiv.appendChild(refreshBtn);
 }
 
