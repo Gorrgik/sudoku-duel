@@ -4896,7 +4896,8 @@ async function showAdminDaily() {
   const todayStr = `${msk.getUTCFullYear()}-${String(msk.getUTCMonth() + 1).padStart(2, '0')}-${String(msk.getUTCDate()).padStart(2, '0')}`;
 
   const loadAndRender = async () => {
-    const rows = await sbGet('daily_results', `date=eq.${todayStr}&order=time_seconds.asc&limit=200`);
+    const r = await fetch(`${_SB_REST}/daily_results?date=eq.${todayStr}&order=time_seconds.asc&limit=200`, { headers: _SB_HDR });
+    const rows = r.ok ? await r.json() : [];
     const table = !rows || rows.length === 0
       ? `<div class="empty-state">Сегодня ещё никто не прошёл Daily Challenge.</div>`
       : `<div style="max-height:50vh;overflow-y:auto;">
@@ -4939,7 +4940,7 @@ async function showAdminDaily() {
         const uid = btn.dataset.uid;
         const name = btn.dataset.name;
         if (!confirm(`Удалить результат ${name} и дать пересдать?`)) return;
-        await sbDelete('daily_results', `id=eq.${id}`);
+        await fetch(`${_SB_REST}/daily_results?id=eq.${id}`, { method: 'DELETE', headers: _SB_HDR });
         loadAndRender();
       });
     });
@@ -4953,7 +4954,7 @@ async function showAdminDaily() {
   document.getElementById('adminDailyResetToday')?.addEventListener('click', async () => {
     if (!confirm(`Удалить ВСЕ результаты Daily Challenge за ${todayStr}? Все смогут пройти заново.`)) return;
     if (!confirm('Точно? Это действие необратимо.')) return;
-    await sbDelete('daily_results', `date=eq.${todayStr}`);
+    await fetch(`${_SB_REST}/daily_results?date=eq.${todayStr}`, { method: 'DELETE', headers: _SB_HDR });
     loadAndRender();
   });
 }
