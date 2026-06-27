@@ -3938,6 +3938,7 @@ async function showAdminPanel() {
         <button class="btn primary" id="adminTabRecords" style="flex:1;min-width:80px">🏆 Рекорды</button>
         <button class="btn primary" id="adminTabRatings" style="flex:1;min-width:80px">⚔️ Рейтинг</button>
         <button class="btn primary" id="adminTabRooms" style="flex:1;min-width:80px">🎮 Дуэли</button>
+        <button class="btn primary" id="adminTabDaily" style="flex:1;min-width:80px">📅 Daily</button>
         <button class="btn primary" id="adminTabFeedback" style="flex:1;min-width:80px">📨 Связь</button>
         <button class="btn primary" id="adminTabUsers" style="flex:1;min-width:80px">👥 Юзеры</button>
       </div>
@@ -3985,6 +3986,7 @@ async function showAdminPanel() {
   wireAdminTab('adminTabRatings', showAdminRatings);
   wireAdminTab('adminTabRooms', showAdminRooms);
   wireAdminTab('adminTabMonitor', showAdminMonitor);
+  wireAdminTab('adminTabDaily', showAdminDaily);
   wireAdminTab('adminTabFeedback', showAdminFeedback);
   wireAdminTab('adminTabUsers', showAdminUsers);
 
@@ -4878,6 +4880,81 @@ async function updateUserRating(uid, name, delta) {
   await fetch(`${_SB_REST}/duel_ratings`, {
     method: 'POST', headers: { ..._SB_HDR, 'Prefer': 'resolution=merge-duplicates' }, mode: 'cors',
     body: JSON.stringify(payload)
+  });
+}
+
+// ─── Раздел «Daily Challenge» в админке ───
+async function showAdminDaily() {
+  const section = document.getElementById('adminSection');
+  const actionsDiv = document.getElementById('adminActions');
+  section.innerHTML = '<div style="color:var(--text-dim);padding:12px 0;">Загрузка...</div>';
+  actionsDiv.innerHTML = '';
+
+  // Определяем сегодняшнюю дату (МСК)
+  const now = new Date();
+  const msk = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+  const todayStr = `${msk.getUTCFullYear()}-${String(msk.getUTCMonth() + 1).padStart(2, '0')}-${String(msk.getUTCDate()).padStart(2, '0')}`;
+
+  const loadAndRender = async () => {
+    const rows = await sbGet('daily_results', `date=eq.${todayStr}&order=time_seconds.asc&limit=200`);
+    const table = !rows || rows.length === 0
+      ? `<div class="empty-state">Сегодня ещё никто не прошёл Daily Challenge.</div>`
+      : `<div style="max-height:50vh;overflow-y:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+            <thead><tr style="background:var(--bg-soft);">
+              <th style="padding:6px;text-align:left;">#</th>
+              <th style="padding:6px;text-align:left;">Игрок</th>
+              <th style="padding:6px;">UID</th>
+              <th style="padding:6px;">Время</th>
+              <th style="padding:6px;">Ошибок</th>
+              <th style="padding:6px;">Действие</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r, i) => `
+                <tr style="border-top:1px solid var(--bg-soft);">
+                  <td style="padding:6px;">${i + 1}</td>
+                  <td style="padding:6px;">${escapeHtml(r.name || '?')}</td>
+                  <td style="padding:6px;font-size:0.75rem;color:var(--text-dim);">${escapeHtml((r.uid || '').slice(0, 24))}</td>
+                  <td style="padding:6px;text-align:center;">${formatTime(r.time_seconds)}</td>
+                  <td style="padding:6px;text-align:center;">${r.errors || 0}</td>
+                  <td style="padding:6px;text-align:center;">
+                    <button class="btn ghost daily-retry-btn" data-id="${r.id}" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name || '?')}" style="font-size:0.75rem;padding:4px 8px;color:var(--warn);">🔄 Дать пересдать</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+    section.innerHTML = `
+      <h3 style="margin:8px 0;">📅 Daily Challenge — ${todayStr}</h3>
+      <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:10px;">Участников сегодня: <strong>${rows ? rows.length : 0}</strong></div>
+      ${table}
+    `;
+
+    // Навешиваем обработчики на кнопки "Дать пересдать"
+    section.querySelectorAll('.daily-retry-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const uid = btn.dataset.uid;
+        const name = btn.dataset.name;
+        if (!confirm(`Удалить результат ${name} и дать пересдать?`)) return;
+        await sbDelete('daily_results', `id=eq.${id}`);
+        loadAndRender();
+      });
+    });
+  };
+
+  await loadAndRender();
+
+  actionsDiv.innerHTML = `
+    <button class="btn primary" id="adminDailyResetToday" style="background:var(--warn);border-color:var(--warn);">🗑 Сбросить ВСЕ результаты за сегодня</button>
+  `;
+  document.getElementById('adminDailyResetToday')?.addEventListener('click', async () => {
+    if (!confirm(`Удалить ВСЕ результаты Daily Challenge за ${todayStr}? Все смогут пройти заново.`)) return;
+    if (!confirm('Точно? Это действие необратимо.')) return;
+    await sbDelete('daily_results', `date=eq.${todayStr}`);
+    loadAndRender();
   });
 }
 
