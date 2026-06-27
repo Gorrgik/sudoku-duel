@@ -189,7 +189,6 @@
     myUid = currentUser.id;
     localStorage.setItem('sudoku_uid', myUid);
     // Сохраняем в таблицу users (uid, email, name)
-    fetch(_SB_URL_REPLACE_ME || 'https://iirydyaesqidmvpsmzfn.supabase.co', { method: 'GET' }); // no-op
     try {
       const sbRest = (typeof _SB_REST !== 'undefined') ? _SB_REST : 'https://iirydyaesqidmvpsmzfn.supabase.co/rest/v1';
       const sbHdr = { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g', 'Content-Type': 'application/json' };
