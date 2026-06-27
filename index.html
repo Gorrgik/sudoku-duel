@@ -146,7 +146,7 @@
     localStorage.setItem(GIS_SESSION_KEY, JSON.stringify(payload));
     // Обновляем currentUser и myUid (используются в остальном коде)
     currentUser = {
-      id: 'google_' + payload.sub,
+      id: 'user_' + payload.email,
       email: payload.email,
       user_metadata: { name: payload.name, picture: payload.picture, sub: payload.sub, provider: 'google' }
     };
@@ -181,7 +181,7 @@
       }
       // Восстанавливаем currentUser и myUid
       currentUser = {
-        id: 'google_' + payload.sub,
+        id: 'user_' + payload.email,
         email: payload.email,
         user_metadata: { name: payload.name, picture: payload.picture, sub: payload.sub, provider: 'google' }
       };
@@ -422,7 +422,7 @@
         const s = JSON.parse(raw);
         if (s.email && (!s.expires_at || new Date(s.expires_at) > new Date())) {
           return {
-            id: 'email_' + s.email,
+            id: 'user_' + s.email,
             email: s.email,
             user_metadata: { name: s.email.split('@')[0], email: s.email, provider: 'email' }
           };
@@ -431,9 +431,9 @@
       const gis = localStorage.getItem('gis_session');
       if (gis) {
         const s = JSON.parse(gis);
-        if (s.sub) {
+        if (s.sub && s.email) {
           return {
-            id: 'google_' + s.sub,
+            id: 'user_' + s.email,
             email: s.email,
             user_metadata: { name: s.name || s.email?.split('@')[0], picture: s.picture, sub: s.sub, provider: 'google' }
           };
@@ -3157,21 +3157,38 @@ function showAuthModal() {
     document.getElementById('authCancelNameBtn')?.addEventListener('click', hideInput);
     // Обновить name во ВСЕХ таблицах по email/uid (после смены ника)
 async function updateNameEverywhere(uid, email, newName) {
-  const filter = email ? `email=eq.${encodeURIComponent(email)}` : `uid=eq.${uid}`;
-  const tables = ['duel_ratings', 'single_records', 'rating_history', 'matchmaking', 'duel_queue'];
-  for (const t of tables) {
+  // Таблицы с email колонкой
+  const tablesWithEmail = ['duel_ratings', 'single_records', 'rating_history'];
+  // Таблицы без email колонки — только по uid
+  const tablesUidOnly = ['matchmaking', 'duel_queue', 'duel_rooms'];
+  // Сначала обновляем по email (где есть колонка)
+  if (email) {
+    for (const t of tablesWithEmail) {
+      try {
+        await fetch(`${_SB_REST}/${t}?email=eq.${encodeURIComponent(email)}`, {
+          method: 'PATCH', headers: _SB_HDR, mode: 'cors',
+          body: JSON.stringify({ name: newName })
+        });
+      } catch (e) { console.warn(`update name in ${t} failed:`, e); }
+    }
+  }
+  // Затем fallback по uid — для всех таблиц
+  const allTables = [...tablesWithEmail, ...tablesUidOnly];
+  for (const t of allTables) {
     try {
-      await fetch(`${_SB_REST}/${t}?${filter}`, {
+      await fetch(`${_SB_REST}/${t}?uid=eq.${encodeURIComponent(uid)}`, {
         method: 'PATCH', headers: _SB_HDR, mode: 'cors',
         body: JSON.stringify({ name: newName })
       });
-    } catch (e) { console.warn(`update name in ${t} failed:`, e); }
-  }
-  // Fallback по uid (если email не заполнен в каких-то строках)
-  if (email) {
-    for (const t of tables) {
+    } catch (e) {}
+    // Для duel_rooms нужно отдельно обновить player1_uid и player2_uid
+    if (t === 'duel_rooms') {
       try {
-        await fetch(`${_SB_REST}/${t}?uid=eq.${uid}`, {
+        await fetch(`${_SB_REST}/duel_rooms?player1_uid=eq.${encodeURIComponent(uid)}`, {
+          method: 'PATCH', headers: _SB_HDR, mode: 'cors',
+          body: JSON.stringify({ name: newName })
+        });
+        await fetch(`${_SB_REST}/duel_rooms?player2_uid=eq.${encodeURIComponent(uid)}`, {
           method: 'PATCH', headers: _SB_HDR, mode: 'cors',
           body: JSON.stringify({ name: newName })
         });
@@ -3438,7 +3455,7 @@ async function showEmailLoginStep2(email) {
       const defaultName = data.email.split('@')[0];
       // Восстанавливаем сессию (currentUser + myUid)
       currentUser = {
-        id: 'email_' + data.email,
+        id: 'user_' + data.email,
         email: data.email,
         user_metadata: { name: defaultName, email: data.email, provider: 'email' }
       };
@@ -3479,7 +3496,7 @@ function loadEmailSession() {
       return null;
     }
     currentUser = {
-      id: 'email_' + sess.email,
+      id: 'user_' + sess.email,
       email: sess.email,
       user_metadata: { name: sess.email.split('@')[0], email: sess.email, provider: 'email' }
     };
