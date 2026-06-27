@@ -2289,15 +2289,15 @@ function highlightSelection() {
   const { r, c } = selectedCell;
   const sel = getCellEl(r, c);
   if (!sel) return;
-  // Правило: выделение клетки (selected + highlight строк/столбцов) — ТОЛЬКО для пустых клеток
-  // Если в клетке уже есть цифра — она подсвечивается как same-num, но НЕ выделяется как selected
-  if (cellHasDigit) return;
-  sel.classList.add('selected');
+  // Подсвечиваем строку и столбец (всегда, даже если в клетке цифра)
   for (let i = 0; i < 81; i++) {
     const rr = Math.floor(i/9), cc = i%9;
     const el = getCellEl(rr, cc);
     if (rr === r || cc === c) el.classList.add('highlight');
   }
+  // Правило: выделение самой клетки (.selected) — ТОЛЬКО для пустых клеток
+  // Если в клетке цифра — same-num подсвечивает её, но без .selected
+  if (!cellHasDigit) sel.classList.add('selected');
 }
 
 function renderNumPad() {
