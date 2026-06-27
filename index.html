@@ -1541,33 +1541,25 @@
       <button class="btn icon-btn" id="settingsBtn" title="Настройки">⚙️</button>
     </div>
   </div>
-  <h2>Выбери уровень сложности</h2>
+  <h2 style="margin-top:24px;">Начать игру</h2>
   <div class="level-grid">
     <button class="level-btn easy" data-level="easy">
       <div>
-        <div class="lvl-title">Лёгкий</div>
-        <div class="lvl-desc">35 чисел дано · идеально для старта</div>
+        <div class="lvl-title">▶ Начать игру</div>
+        <div class="lvl-desc">Выбрать сложность при клике</div>
       </div>
-      <div class="lvl-icon">●</div>
+      <div class="lvl-icon">🎮</div>
     </button>
-    <button class="level-btn medium" data-level="medium">
+    <button class="level-btn medium" id="showDuelBtn">
       <div>
-        <div class="lvl-title">Средний</div>
-        <div class="lvl-desc">30 чисел дано · баланс вызова</div>
+        <div class="lvl-title">⚔️ Начать дуэль</div>
+        <div class="lvl-desc">Сразись с реальным игроком</div>
       </div>
-      <div class="lvl-icon">●●</div>
-    </button>
-    <button class="level-btn hard" data-level="hard">
-      <div>
-        <div class="lvl-title">Сложный</div>
-        <div class="lvl-desc">25 чисел дано · для мастеров</div>
-      </div>
-      <div class="lvl-icon">●●●</div>
+      <div class="lvl-icon" style="background:rgba(239,68,68,0.15);color:var(--bad);">⚔️</div>
     </button>
   </div>
   <div class="extra-actions">
     <button class="btn primary" id="resumeBtn" style="display:none">▶ Продолжить игру</button>
-    <button class="btn duel-btn" id="showDuelBtn">⚔️ Дуэль</button>
     <button class="btn ghost" id="showRecordsBtn">🏆 Таблица рекордов</button>
     <button class="btn ghost" id="showDuelRatingsBtn">📊 Рейтинг дуэлей</button>
   </div>
@@ -3099,13 +3091,64 @@ function hideModal() {
 
 /* ============== EVENTS ============== */
 
-document.querySelectorAll('.level-btn').forEach(btn => {
+// Кнопка «Начать игру» — показывает выбор сложности
+document.querySelectorAll('.level-btn[data-level]').forEach(btn => {
   btn.addEventListener('click', () => {
     const lvl = btn.dataset.level;
     clearState();
     newGame(lvl);
   });
 });
+
+// Кнопка «Начать игру» (без data-level) — открывает выбор сложности
+const startGameBtn = document.querySelector('.level-btn:not([data-level]):not(#showDuelBtn)');
+if (startGameBtn) {
+  startGameBtn.addEventListener('click', () => {
+    showChooseDifficultyModal();
+  });
+}
+
+// Показ модалки выбора сложности
+function showChooseDifficultyModal() {
+  const modal = $('modalContent');
+  modal.innerHTML = `
+    <h2>🎮 Выбери сложность</h2>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
+      <button class="level-btn easy" data-level="easy" style="margin:0;">
+        <div>
+          <div class="lvl-title">🟢 Лёгкий</div>
+          <div class="lvl-desc">35 чисел дано · идеально для старта</div>
+        </div>
+        <div class="lvl-icon">●</div>
+      </button>
+      <button class="level-btn medium" data-level="medium" style="margin:0;">
+        <div>
+          <div class="lvl-title">🟡 Средний</div>
+          <div class="lvl-desc">30 чисел дано · баланс вызова</div>
+        </div>
+        <div class="lvl-icon">●●</div>
+      </button>
+      <button class="level-btn hard" data-level="hard" style="margin:0;">
+        <div>
+          <div class="lvl-title">🔴 Сложный</div>
+          <div class="lvl-desc">25 чисел дано · для мастеров</div>
+        </div>
+        <div class="lvl-icon">●●●</div>
+      </button>
+    </div>
+    <button class="btn ghost" id="diffCancelBtn" style="width:100%;margin-top:12px;">Отмена</button>
+  `;
+  showModal();
+  playClick?.();
+  modal.querySelectorAll('.level-btn[data-level]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      clearState();
+      newGame(btn.dataset.level);
+      hideModal();
+    });
+  });
+  $('diffCancelBtn')?.addEventListener('click', hideModal);
+}
 
 // ── Auth UI ──────────────────────────────────────────────────────
 function updateAuthButton() {
