@@ -1537,8 +1537,8 @@
     <div></div>
     <div style="display:flex;gap:6px;">
       <button class="btn icon-btn auth-btn" id="authBtn" title="Войти">👤</button>
-      <button class="btn icon-btn" id="adminBtn" title="Админка" style="display:none" onclick="showAdminPanel()">⚙️</button>
-      <button class="btn icon-btn" id="settingsBtn" title="Настройки">🛠</button>
+      <button class="btn icon-btn" id="adminBtn" title="Админка" style="display:none" onclick="showAdminPanel()">👑</button>
+      <button class="btn icon-btn" id="settingsBtn" title="Настройки">⚙️</button>
     </div>
   </div>
   <h2>Выбери уровень сложности</h2>
@@ -1578,7 +1578,7 @@
 <div id="gameScreen" class="screen game-screen hidden">
   <div class="topbar">
     <div class="topbar-left">
-      <button class="btn icon-btn" id="gameSettingsBtn" title="Настройки">🛠</button>
+      <button class="btn icon-btn settings-btn" id="gameSettingsBtn" title="Настройки">⚙️</button>
       <button class="btn icon-btn auth-btn" id="gameAuthBtn" title="Войти">👤</button>
     </div>
     <div class="topbar-center">
@@ -1645,7 +1645,7 @@
   <div class="num-pad" id="duelNumPad"></div>
   <div class="controls">
     <button class="btn icon-btn auth-btn" id="duelAuthBtn" title="Войти">👤</button>
-    <button class="btn icon-btn" id="duelSettingsBtn" title="Настройки">🛠</button>
+    <button class="btn icon-btn settings-btn" id="duelSettingsBtn" title="Настройки">⚙️</button>
     <button class="btn ghost" id="duelPencilBtn">✏️ Карандаш</button>
     <button class="btn ghost" id="duelQuitBtn" style="pointer-events:auto;z-index:10;position:relative;">✕ Выйти</button>
   </div>
@@ -4936,9 +4936,7 @@ document.addEventListener('click', async e => {
 }, true); // capture phase
 
 // Переключатели темы и звука
-$('settingsBtn')?.addEventListener('click', showSettingsModal);
-$('gameSettingsBtn')?.addEventListener('click', showSettingsModal);
-$('duelSettingsBtn')?.addEventListener('click', showSettingsModal);
+document.querySelectorAll('.settings-btn, #settingsBtn').forEach(b => b?.addEventListener('click', showSettingsModal));
 $('themeBtn')?.addEventListener('click', () => { toggleTheme(); playClick(); });
 
 // Клик ВНЕ активных элементов игры = снять выделение (capture phase — срабатывает раньше других обработчиков)
