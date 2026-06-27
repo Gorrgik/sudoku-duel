@@ -1363,7 +1363,23 @@
   }
 
   /* Модалка */
-  .modal-overlay {
+  @keyframes modalOverlayIn {
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to { opacity: 1; backdrop-filter: blur(4px); }
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(40px) scale(0.92); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes modalOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(20px) scale(0.95); }
+}
+@keyframes overlayOut {
+  from { opacity: 1; }
+  to { opacity: 0; backdrop-filter: blur(0); }
+}
+.modal-overlay {
     position: fixed;
     inset: 0;
     background: rgba(0,0,0,0.65);
@@ -1373,8 +1389,11 @@
     justify-content: center;
     padding: 16px;
     z-index: 50;
+    animation: modalOverlayIn 0.25s ease both;
   }
-
+  .modal-overlay.closing {
+    animation: overlayOut 0.2s ease both;
+  }
   .modal {
     background: var(--panel);
     border-radius: 18px;
@@ -1383,6 +1402,10 @@
     width: 100%;
     box-shadow: 0 30px 70px rgba(0,0,0,0.6);
     border: 1px solid rgba(255,255,255,0.06);
+    animation: modalIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .modal.closing {
+    animation: modalOut 0.2s ease both;
   }
 
   .modal h2 { margin-bottom: 8px; }
@@ -3100,7 +3123,19 @@ function showModal() {
 function hideModal() {
   const m = $('modal');
   if (!m) return;
-  m.classList.add('hidden');
+  if (!m.classList.contains('hidden')) {
+    // Анимация закрытия
+    m.classList.add('closing');
+    const inner = m.querySelector('.modal');
+    if (inner) inner.classList.add('closing');
+    setTimeout(() => {
+      m.classList.add('hidden');
+      m.classList.remove('closing');
+      if (inner) inner.classList.remove('closing');
+    }, 200);
+  } else {
+    m.classList.add('hidden');
+  }
   // Дополнительно сбрасываем inline-стили которые админка ставит при открытии
   m.style.removeProperty('display');
   m.style.removeProperty('z-index');
