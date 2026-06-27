@@ -4404,7 +4404,105 @@ function escapeHtml(s) {
 // ===========================================
 window.addEventListener('auth_state_changed', () => {
   updateAuthButton();
+  // После входа/регистрации — если ник совпадает с частью email или пустой, показать выбор
+  const user = window.FB?.getCurrentUser();
+  if (user) {
+    const metaName = user.user_metadata?.name || '';
+    const emailPart = (user.email || '').split('@')[0];
+    if (!metaName || metaName.toLowerCase() === emailPart.toLowerCase()) {
+      setTimeout(() => showChooseNicknameModal(), 600);
+    }
+  }
 });
+
+// Модалка «Выбери свой ник» — показывается после регистрации/первого входа
+async function showChooseNicknameModal() {
+  const user = window.FB?.getCurrentUser();
+  if (!user) return;
+  const email = user.email || '';
+  const defaultName = (user.user_metadata?.name || email.split('@')[0] || '').trim();
+  const modal = $('modalContent');
+  modal.innerHTML = `
+    <h2>👋 Добро пожаловать!</h2>
+    <div style="color:var(--text-dim);font-size:0.88rem;margin-bottom:4px;">Вошёл как:</div>
+    <div style="background:var(--bg-soft);padding:8px 12px;border-radius:8px;margin-bottom:16px;font-family:monospace;font-size:0.9rem;">${escapeHtml(email)}</div>
+    <div style="margin-bottom:8px;font-weight:600;">Выбери свой ник (2-20 символов):</div>
+    <input type="text" id="chooseNickInput" maxlength="20" value="${escapeHtml(defaultName)}" style="width:100%;padding:12px;border-radius:8px;border:2px solid var(--accent);background:var(--bg-soft);color:var(--text);font-size:1rem;margin-bottom:8px;">
+    <div id="chooseNickStatus" style="min-height:20px;margin-bottom:12px;font-size:0.85rem;"></div>
+    <button class="btn primary" id="chooseNickSaveBtn" style="width:100%">💾 Сохранить ник</button>
+  `;
+  showModal();
+
+  const input = $('chooseNickInput');
+  const status = $('chooseNickStatus');
+  const saveBtn = $('chooseNickSaveBtn');
+
+  // Live-проверка уникальности
+  let checkTimer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(checkTimer);
+    const v = input.value.trim();
+    status.textContent = '';
+    saveBtn.disabled = false;
+    if (v.length < 2) { status.innerHTML = '<span style="color:var(--text-dim)">Минимум 2 символа</span>'; saveBtn.disabled = true; return; }
+    if (v.length > 20) { status.innerHTML = '<span style="color:var(--warn)">Максимум 20</span>'; saveBtn.disabled = true; return; }
+    status.innerHTML = '<span style="color:var(--text-dim)">⏳ Проверяю...</span>';
+    checkTimer = setTimeout(async () => {
+      try {
+        const r = await fetch(`${_SB_REST}/users?name=ilike.${encodeURIComponent(v)}&select=uid&limit=1`, {
+          method: 'GET', headers: _SB_HDR, mode: 'cors'
+        });
+        if (r.ok) {
+          const arr = await r.json();
+          if (arr.length > 0 && arr[0].uid !== user.id) {
+            status.innerHTML = `<span style="color:var(--warn)">❌ Ник «${escapeHtml(v)}» уже занят</span>`;
+            saveBtn.disabled = true;
+          } else {
+            status.innerHTML = `<span style="color:var(--good)">✅ Свободен</span>`;
+            saveBtn.disabled = false;
+          }
+        }
+      } catch (e) {
+        status.innerHTML = '<span style="color:var(--text-dim)">Не удалось проверить</span>';
+      }
+    }, 400);
+  });
+
+  // Триггерим первую проверку
+  input.dispatchEvent(new Event('input'));
+
+  saveBtn.addEventListener('click', async () => {
+    const newName = input.value.trim();
+    if (newName.length < 2 || newName.length > 20) return;
+    saveBtn.disabled = true;
+    saveBtn.textContent = '⏳ Сохраняю...';
+    const myUid = window.FB.getMyUid();
+    // 1) Supabase user_metadata
+    try { await supabase.auth.updateUser({ data: { name: newName } }); } catch(e) {}
+    // 2) users (тут БРОСИТ ошибку если constraint нарушен)
+    try {
+      const r = await fetch(`${_SB_REST}/users?uid=eq.${myUid}`, {
+        method: 'PATCH', headers: _SB_HDR, mode: 'cors',
+        body: JSON.stringify({ name: newName })
+      });
+      if (!r.ok) {
+        const errTxt = await r.text();
+        if (/duplicate|unique/i.test(errTxt)) {
+          saveBtn.disabled = false; saveBtn.textContent = '💾 Сохранить ник';
+          status.innerHTML = `<span style="color:var(--warn)">❌ Сервер отклонил: ник занят</span>`;
+          return;
+        }
+      }
+    } catch(e) {}
+    // 3) localStorage
+    window.FB.setMyName(newName);
+    // 4) Все таблицы по email
+    await updateNameEverywhere(myUid, email, newName);
+    hideModal();
+    updateAuthButton();
+    alert('✅ Ник сохранён: ' + newName);
+  });
+}
 // Начальное обновление кнопки
 setTimeout(updateAuthButton, 100);
 // Повторные попытки — на случай если событие успело сработать до регистрации слушателя
