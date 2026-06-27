@@ -45,9 +45,9 @@
 
       supabase.auth.onAuthStateChange(async (event, session) => {
         console.log('[SUDOKU] Auth event:', event, session ? 'session exists' : 'no session');
-        // Если уже залогинены через GIS — не трогаем currentUser (Supabase не знает про эту сессию)
-        if (!session && localStorage.getItem('gis_session')) {
-          console.log('[SUDOKU] GIS session present, skip Supabase null-reset');
+        // Если уже залогинены через GIS или email — не трогаем currentUser
+        if (!session && (localStorage.getItem('gis_session') || localStorage.getItem('email_session'))) {
+          console.log('[SUDOKU] Custom session present, skip Supabase null-reset');
           return;
         }
         if (session && session.user) {
@@ -117,52 +117,7 @@
     if (snap) myRating = snap.rating || 1000;
   }
 
-  // Auth API
-  async function signInWithGoogle() {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.href,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        }
-      }
-    });
-    if (error) alert('Ошибка входа через Google: ' + error.message);
-  }
-
-  async function signInWithEmail(email, password) {
-    if (!supabase) return { error: 'Supabase не инициализирован' };
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error };
-  }
-
-  async function signUpWithEmail(email, password, name) {
-    if (!supabase) return { error: 'Supabase не инициализирован' };
-    const { error } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { name } }
-    });
-    return { error };
-  }
-
-  async function signOut() {
-    if (!supabase) return;
-    try {
-      await supabase.auth.signOut();
-    } catch (e) {}
-    // Принудительно очищаем ВСЕ ключи Supabase из localStorage
-    // (иначе после повторного входа через Google OAuth ломается — PKCE state невалидный)
-    const keys = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && (k.startsWith('sb-') || k.includes('supabase') || k.includes('pkce'))) keys.push(k);
-    }
-    keys.forEach(k => localStorage.removeItem(k));
-  }
-
+  // Auth API (Supabase Auth больше не используется — только Google Identity Services)
   function getAuthStatus() {
     return { isLoggedIn: !!currentUser, user: currentUser };
   }
@@ -271,6 +226,11 @@
 
   // Пробуем восстановить GIS сессию из localStorage (своя аутентификация)
   gisLoadSession();
+
+  // Восстанавливаем email-сессию если есть
+  if (!currentUser) {
+    try { loadEmailSession(); } catch (e) {}
+  }
 
   // Fallback: если нет UID и не залогинены — создаём анонимный
   if (!localStorage.getItem('sudoku_uid') && !currentUser) {
@@ -457,10 +417,10 @@
     getMyName: () => (myName && myName.trim()) || currentUser?.user_metadata?.name || currentUser?.email?.split('@')[0] || 'Игрок',
     setMyName: n => { myName = String(n).trim().slice(0, 20); localStorage.setItem('sudoku_duel_name', myName); },
     getCurrentUser: () => currentUser,
-    signInWithGoogle,
-    signInWithEmail,
-    signUpWithEmail,
-    signOut,
+    signInWithGoogle: () => alert('Supabase Auth удалён. Используйте Google (GIS) кнопку.'),
+    signInWithEmail: () => ({ error: { message: 'Supabase Auth удалён' } }),
+    signUpWithEmail: () => ({ error: { message: 'Supabase Auth удалён' } }),
+    signOut: () => gisSignOut(),
     getAuthStatus,
 
     async saveRecord(rec) {
@@ -3206,8 +3166,6 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
 
       // Сохраняем в localStorage (приоритет над user_metadata)
       window.FB.setMyName(newName);
-      // Обновляем в Supabase user_metadata
-      try { await supabase.auth.updateUser({ data: { name: newName } }); } catch(e) {}
       // Обновляем в users
       try {
         await fetch(`${_SB_REST}/users?uid=eq.${myUid}`, {
@@ -3235,18 +3193,10 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
       const user = window.FB?.getCurrentUser();
       const name = user?.user_metadata?.name || user?.email || '?';
       if (!confirm(`Выйти из аккаунта «${name}»?`)) return;
-      // Определяем способ аутентификации
-      const isGis = localStorage.getItem('gis_session');
       try {
-        if (isGis) {
-          gisSignOut();
-          hideModal();
-          location.replace(location.href.split('?')[0] + '?t=' + Date.now());
-        } else {
-          await window.FB.signOut();
-          hideModal();
-          location.replace(location.href.split('?')[0] + '?t=' + Date.now());
-        }
+        gisSignOut();
+        hideModal();
+        location.replace(location.href.split('?')[0] + '?t=' + Date.now());
       } catch (err) {
         alert('Ошибка выхода: ' + err.message);
       }
@@ -3260,15 +3210,6 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
         <h2>🔐 Вход</h2>
         <div style="color:var(--text-dim);font-size:0.88rem;">Войди чтобы сохранять рейтинг и рекорды</div>
       </div>
-      <button class="btn" id="authGoogleBtn" style="width:100%;margin-bottom:12px;background:#fff;color:#333;font-weight:600;border:1px solid #dadce0;border-radius:8px;padding:10px 16px;">
-        <svg width="18" height="18" viewBox="0 0 18 18" style="vertical-align:middle;margin-right:8px;">
-          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
-          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-          <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
-          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
-        </svg>
-        Войти через Google (Supabase)
-      </button>
       <button class="btn" id="authGoogleGisBtn" style="width:100%;margin-bottom:12px;background:#fff;color:#333;font-weight:600;border:1px solid #dadce0;border-radius:8px;padding:10px 16px;">
         <svg width="18" height="18" viewBox="0 0 18 18" style="vertical-align:middle;margin-right:8px;">
           <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
@@ -3276,33 +3217,14 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
           <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
           <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
         </svg>
-        Войти через Google (GIS)
+        Войти через Google
       </button>
+      <button class="btn primary" id="authEmailCodeBtn" style="width:100%;margin-bottom:12px;">📧 Войти через Email (код)</button>
       <div class="duel-or">или</div>
-      <div class="cloud-fields">
-        <label>Email</label>
-        <input type="email" id="authEmailInput" placeholder="pochta@mail.ru">
-        <div style="font-size:0.78rem;color:var(--text-dim);margin-top:4px;">⚠️ Используй тот же email, что и на ПК/телефоне — иначе будет другой аккаунт</div>
-      </div>
-      <div class="cloud-fields">
-        <label>Пароль</label>
-        <input type="password" id="authPasswordInput" placeholder="••••••">
-      </div>
-      <button class="btn primary" id="authEmailBtn" style="width:100%;margin-bottom:8px;">Войти</button>
-      <div style="text-align:center;margin-bottom:8px;">
-        <a href="#" id="authForgotBtn" style="color:var(--accent);font-size:13px;text-decoration:underline;">Забыл пароль?</a>
-      </div>
-      <button class="btn ghost" id="authSignupBtn" style="width:100%;margin-bottom:12px;">Регистрация</button>
+      <button class="btn ghost" id="authGuestBtn" style="width:100%;margin-bottom:12px;">👤 Продолжить как гость</button>
       <button class="btn ghost" id="authModalCloseBtn" style="width:100%">Отмена</button>
     `;
     showModal();
-
-    $('authGoogleBtn')?.addEventListener('click', async () => {
-      $('authGoogleBtn').disabled = true;
-      $('authGoogleBtn').textContent = '⏳ Перенаправляем...';
-      await window.FB.signInWithGoogle();
-      hideModal();
-    });
 
     // GIS — своя аутентификация через Google Identity Services
     $('authGoogleGisBtn')?.addEventListener('click', () => {
@@ -3312,20 +3234,18 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
         if (typeof google === 'undefined' || !google.accounts) {
           alert('Google SDK ещё загружается, подожди пару секунд и попробуй снова');
           $('authGoogleGisBtn').disabled = false;
-          $('authGoogleGisBtn').innerHTML = 'Войти через Google (GIS)';
+          $('authGoogleGisBtn').innerHTML = 'Войти через Google';
           return;
         }
         const client = google.accounts.oauth2.initTokenClient({
           client_id: GOOGLE_CLIENT_ID,
           scope: 'openid email profile',
           callback: (tokenResponse) => {
-            // access_token получен — теперь запрашиваем user info
             fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
               headers: { 'Authorization': 'Bearer ' + tokenResponse.access_token }
             })
             .then(r => r.json())
             .then(profile => {
-              // profile: { sub, email, name, picture, email_verified }
               if (!profile.sub) { alert('Не удалось получить профиль Google'); return; }
               const payload = {
                 sub: profile.sub,
@@ -3343,13 +3263,13 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
               console.error(err);
               alert('Ошибка получения профиля Google');
               $('authGoogleGisBtn').disabled = false;
-              $('authGoogleGisBtn').innerHTML = 'Войти через Google (GIS)';
+              $('authGoogleGisBtn').innerHTML = 'Войти через Google';
             });
           },
           error_callback: (err) => {
             console.error('GIS error:', err);
             $('authGoogleGisBtn').disabled = false;
-            $('authGoogleGisBtn').innerHTML = 'Войти через Google (GIS)';
+            $('authGoogleGisBtn').innerHTML = 'Войти через Google';
           }
         });
         client.requestAccessToken();
@@ -3357,66 +3277,172 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
         console.error(e);
         alert('Ошибка инициализации Google: ' + e.message);
         $('authGoogleGisBtn').disabled = false;
-        $('authGoogleGisBtn').innerHTML = 'Войти через Google (GIS)';
+        $('authGoogleGisBtn').innerHTML = 'Войти через Google';
       }
     });
 
-    $('authEmailBtn')?.addEventListener('click', async () => {
-      const email = $('authEmailInput')?.value.trim();
-      const password = $('authPasswordInput')?.value;
-      if (!email || !password) { alert('Введи email и пароль'); return; }
-      $('authEmailBtn').disabled = true;
-      $('authEmailBtn').textContent = '⏳';
-      const { error } = await window.FB.signInWithEmail(email, password);
-      $('authEmailBtn').disabled = false;
-      $('authEmailBtn').textContent = 'Войти';
-      if (error) {
-        let msg = error.message;
-        if (/Invalid login credentials/i.test(msg)) msg = 'Неверный email или пароль. Если регистрировался через Google — войди через кнопку Google выше.';
-        else if (/Email not confirmed/i.test(msg)) msg = 'Email не подтверждён. Проверь почту (включая спам).';
-        alert('Ошибка входа: ' + msg);
+    // Гостевой вход — просто создаём анонимный uid
+    $('authGuestBtn')?.addEventListener('click', () => {
+      if (!localStorage.getItem('sudoku_uid')) {
+        const rnd = crypto.getRandomValues(new Uint8Array(8));
+        const anonUid = Array.from(rnd).map(b => b.toString(36).padStart(2, '0')).join('');
+        localStorage.setItem('sudoku_uid', anonUid);
       }
-      else hideModal();
+      hideModal();
+      location.reload();
     });
 
-    $('authForgotBtn')?.addEventListener('click', async (e) => {
-      e.preventDefault();
-      const email = $('authEmailInput')?.value.trim();
-      if (!email) { alert('Сначала введи email в поле выше'); return; }
-      const { error } = await supabase.auth.resetPasswordForEmail(email);
-      if (error) alert('Ошибка: ' + error.message);
-      else alert('📧 Письмо для сброса пароля отправлено на ' + email);
-    });
+    // Email вход — двухшаговый (ввод email → код)
+    $('authEmailCodeBtn')?.addEventListener('click', () => showEmailLoginStep1());
 
-    $('authSignupBtn')?.addEventListener('click', async () => {
-      const email = $('authEmailInput')?.value.trim();
-      const password = $('authPasswordInput')?.value;
-      if (!email || !password) { alert('Введи email и пароль'); return; }
-      if (password.length < 6) { alert('Пароль должен быть минимум 6 символов'); return; }
-      const defaultName = email.split('@')[0];
-      // Проверка: этот ник уже занят?
+    $('authModalCloseBtn')?.addEventListener('click', hideModal);
+  }
+}
+
+// === Email magic-link вход (через Edge Functions) ===
+const EMAIL_SESSION_KEY = 'email_session';
+const FN_URL = 'https://iirydyaesqidmvpsmzfn.supabase.co/functions/v1';
+
+async function showEmailLoginStep1() {
+  const modal = $('modalContent');
+  modal.innerHTML = `
+    <h2>📧 Войти через Email</h2>
+    <div style="color:var(--text-dim);font-size:0.88rem;margin-bottom:16px;">Введи email — на него придёт 6-значный код</div>
+    <input type="email" id="emailLoginInput" maxlength="200" placeholder="you@mail.ru" style="width:100%;padding:12px;border-radius:8px;border:2px solid var(--accent);background:var(--bg-soft);color:var(--text);font-size:1rem;margin-bottom:12px;">
+    <div id="emailLoginStatus" style="min-height:20px;margin-bottom:8px;font-size:0.85rem;"></div>
+    <button class="btn primary" id="emailSendCodeBtn" style="width:100%;margin-bottom:8px;">📨 Отправить код</button>
+    <button class="btn ghost" id="emailBackBtn" style="width:100%;">← Назад</button>
+  `;
+  showModal();
+  $('emailLoginInput').focus();
+
+  $('emailBackBtn').addEventListener('click', () => { if (window.FB) showAuthModal(); });
+
+  $('emailSendCodeBtn').addEventListener('click', async () => {
+    const email = $('emailLoginInput').value.trim().toLowerCase();
+    const status = $('emailLoginStatus');
+    if (!email || !email.includes('@')) {
+      status.innerHTML = '<span style="color:var(--warn)">Введи корректный email</span>';
+      return;
+    }
+    const btn = $('emailSendCodeBtn');
+    btn.disabled = true; btn.textContent = '⏳ Отправляю...';
+    status.innerHTML = '<span style="color:var(--text-dim)">⏳ Отправляем код...</span>';
+    try {
+      const r = await fetch(`${FN_URL}/send-email-code`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await r.json();
+      if (!r.ok || data.error) throw new Error(data.error || 'Send failed');
+      showEmailLoginStep2(email);
+    } catch (e) {
+      status.innerHTML = `<span style="color:var(--warn)">❌ Ошибка: ${escapeHtml(e.message)}</span>`;
+      btn.disabled = false; btn.textContent = '📨 Отправить код';
+    }
+  });
+}
+
+async function showEmailLoginStep2(email) {
+  const modal = $('modalContent');
+  modal.innerHTML = `
+    <h2>📧 Введи код</h2>
+    <div style="color:var(--text-dim);font-size:0.88rem;margin-bottom:16px;">Отправили код на <b>${escapeHtml(email)}</b><br>Код действителен 10 минут</div>
+    <input type="text" id="emailCodeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" style="width:100%;padding:16px;border-radius:8px;border:2px solid var(--accent);background:var(--bg-soft);color:var(--text);font-size:2rem;text-align:center;letter-spacing:8px;font-weight:700;margin-bottom:12px;">
+    <div id="emailCodeStatus" style="min-height:20px;margin-bottom:8px;font-size:0.85rem;"></div>
+    <button class="btn primary" id="emailVerifyBtn" style="width:100%;margin-bottom:8px;">✓ Войти</button>
+    <button class="btn ghost" id="emailResendBtn" style="width:100%;margin-bottom:4px;">📨 Отправить заново</button>
+    <button class="btn ghost" id="emailBack2Btn" style="width:100%;">← Назад</button>
+  `;
+  showModal();
+  $('emailCodeInput').focus();
+
+  $('emailBack2Btn').addEventListener('click', () => showEmailLoginStep1());
+  $('emailResendBtn').addEventListener('click', () => showEmailLoginStep1());
+
+  $('emailCodeInput').addEventListener('input', (e) => {
+    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+  });
+
+  $('emailVerifyBtn').addEventListener('click', async () => {
+    const code = $('emailCodeInput').value.trim();
+    const status = $('emailCodeStatus');
+    if (!/^\d{6}$/.test(code)) {
+      status.innerHTML = '<span style="color:var(--warn)">Код — 6 цифр</span>';
+      return;
+    }
+    const btn = $('emailVerifyBtn');
+    btn.disabled = true; btn.textContent = '⏳ Проверяю...';
+    status.innerHTML = '<span style="color:var(--text-dim)">⏳ Проверяем код...</span>';
+    try {
+      const r = await fetch(`${FN_URL}/verify-email-code`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code })
+      });
+      const data = await r.json();
+      if (!r.ok || data.error) throw new Error(data.error || 'Verify failed');
+      // Сохраняем сессию
+      const session = {
+        token: data.token,
+        email: data.email,
+        expires_at: data.expires_at,
+        provider: 'email',
+        created_at: new Date().toISOString()
+      };
+      localStorage.setItem(EMAIL_SESSION_KEY, JSON.stringify(session));
+      // Имя по умолчанию — часть email до @
+      const defaultName = data.email.split('@')[0];
+      // Восстанавливаем сессию (currentUser + myUid)
+      currentUser = {
+        id: 'email_' + data.email,
+        email: data.email,
+        user_metadata: { name: defaultName, email: data.email, provider: 'email' }
+      };
+      myUid = currentUser.id;
+      localStorage.setItem('sudoku_uid', myUid);
+      // Сохраняем в users
       try {
-        const r = await fetch(`${_SB_REST}/users?name=ilike.${encodeURIComponent(defaultName)}&select=uid&limit=1`, {
-          method: 'GET', headers: _SB_HDR, mode: 'cors'
+        const sbRest = 'https://iirydyaesqidmvpsmzfn.supabase.co/rest/v1';
+        const sbHdr = { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g', 'Content-Type': 'application/json' };
+        await fetch(sbRest + '/users?uid=eq.' + encodeURIComponent(myUid), {
+          method: 'PATCH', headers: { ...sbHdr, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({ uid: myUid, email: data.email, name: defaultName, last_seen: new Date().toISOString() })
         });
-        if (r.ok) {
-          const existing = await r.json();
-          if (existing.length > 0) {
-            alert('❌ Ник «' + defaultName + '» уже занят другим игроком. Зайди через Google (или войди под своим email если уже регистрировался).');
-            return;
-          }
-        }
       } catch (e) {}
-      $('authSignupBtn').disabled = true;
-      $('authSignupBtn').textContent = '⏳ Регистрируем...';
-      const { error } = await window.FB.signUpWithEmail(email, password, defaultName);
-      $('authSignupBtn').disabled = false;
-      $('authSignupBtn').textContent = 'Регистрация';
-      if (error) alert('Ошибка регистрации: ' + error.message);
-      else {
-        alert('📧 Письмо с подтверждением отправлено на ' + email + '! Проверь почту и подтверди регистрацию.');
-      }
-    });
+      window.dispatchEvent(new CustomEvent('auth_state_changed'));
+      hideModal();
+      location.reload();
+    } catch (e) {
+      let msg = e.message;
+      if (/expired/i.test(msg)) msg = 'Код истёк. Запроси новый.';
+      else if (/wrong/i.test(msg)) msg = 'Неверный код. Попробуй ещё раз.';
+      status.innerHTML = `<span style="color:var(--warn)">❌ ${escapeHtml(msg)}</span>`;
+      btn.disabled = false; btn.textContent = '✓ Войти';
+    }
+  });
+}
+
+// Восстановление email-сессии при загрузке
+function loadEmailSession() {
+  try {
+    const raw = localStorage.getItem(EMAIL_SESSION_KEY);
+    if (!raw) return null;
+    const sess = JSON.parse(raw);
+    if (new Date(sess.expires_at) < new Date()) {
+      localStorage.removeItem(EMAIL_SESSION_KEY);
+      return null;
+    }
+    currentUser = {
+      id: 'email_' + sess.email,
+      email: sess.email,
+      user_metadata: { name: sess.email.split('@')[0], email: sess.email, provider: 'email' }
+    };
+    myUid = currentUser.id;
+    localStorage.setItem('sudoku_uid', myUid);
+    window.dispatchEvent(new CustomEvent('auth_state_changed'));
+    return sess;
+  } catch (e) { return null; }
+}
 
     $('authModalCloseBtn')?.addEventListener('click', hideModal);
   }
