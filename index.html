@@ -1365,6 +1365,11 @@
     .level-screen { padding: 22px 18px; }
     .stat .value { font-size: 1.1rem; }
   }
+
+  /* Скрыть кнопку вибрации на устройствах с мышью (десктоп), даже если navigator.vibrate есть как заглушка */
+  @media (hover: hover) and (pointer: fine) {
+    .vib-btn { display: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -2255,18 +2260,26 @@ function selectCell(r, c) {
 }
 
 function highlightSelection() {
-  // Сохраняем .same-num (подсветка цифр при выбранной цифре в авто-режиме)
+  // Снимаем .selected и .highlight со всех клеток (но НЕ .same-num — это отдельная подсветка цифр)
   document.querySelectorAll('.cell').forEach(el => {
-    el.classList.remove('selected', 'highlight');
+    el.classList.remove('selected', 'highlight', 'same-num');
   });
-  // Если выбрана цифра на нумпаде — восстанавливаем подсветку этой цифры
-  if (selectedDigit !== null) {
+  // Собираем цифры, которые нужно подсветить как same-num
+  const digitsToHighlight = new Set();
+  if (selectedDigit !== null) digitsToHighlight.add(selectedDigit);
+  // Если выбрана клетка с цифрой — тоже добавляем её значение
+  let cellHasDigit = false;
+  let cellVal = 0;
+  if (selectedCell) {
+    cellVal = state.user[selectedCell.r][selectedCell.c];
+    if (cellVal !== 0) { cellHasDigit = true; digitsToHighlight.add(cellVal); }
+  }
+  // Подсвечиваем same-num
+  if (digitsToHighlight.size > 0) {
     for (let r = 0; r < 9; r++) {
       for (let c = 0; c < 9; c++) {
-        const boardVal = state?.user[r][c] !== 0
-          ? state.user[r][c]
-          : state.puzzle[r][c];
-        if (boardVal === selectedDigit) {
+        const boardVal = state.user[r][c] !== 0 ? state.user[r][c] : state.puzzle[r][c];
+        if (digitsToHighlight.has(boardVal)) {
           getCellEl(r, c)?.classList.add('same-num');
         }
       }
@@ -2276,18 +2289,14 @@ function highlightSelection() {
   const { r, c } = selectedCell;
   const sel = getCellEl(r, c);
   if (!sel) return;
-  // Если выбрана заблокированная ячейка — оставляем выделение, но без подсветки совпадений
-  if (state.puzzle[r][c] !== 0 && state.user[r][c] === 0) {
-    sel.classList.add('selected');
-    return;
-  }
-  const val = state.user[r][c];
+  // Правило: выделение клетки (selected + highlight строк/столбцов) — ТОЛЬКО для пустых клеток
+  // Если в клетке уже есть цифра — она подсвечивается как same-num, но НЕ выделяется как selected
+  if (cellHasDigit) return;
   sel.classList.add('selected');
   for (let i = 0; i < 81; i++) {
     const rr = Math.floor(i/9), cc = i%9;
     const el = getCellEl(rr, cc);
     if (rr === r || cc === c) el.classList.add('highlight');
-    if (val !== 0 && state.user[rr][cc] === val) el.classList.add('same-num');
   }
 }
 
@@ -4323,26 +4332,30 @@ document.addEventListener('click', async e => {
 // Переключатели темы и звука
 $('themeBtn')?.addEventListener('click', () => { toggleTheme(); playClick(); });
 
-// Клик ВНЕ доски/numPad/контролов = снять выделение
+// Клик ВНЕ активных элементов игры = снять выделение (capture phase — срабатывает раньше других обработчиков)
 document.addEventListener('click', (e) => {
   if (!state || !state.started) return;
   const target = e.target;
-  if (!target || !target.closest) return;
-  // Сбрасываем выделение при клике в "пустоту" — вне активных элементов игры
-  const inActiveArea =
+  if (!target || typeof target.closest !== 'function') return;
+  // Активные зоны — клики по ним НЕ сбрасывают выделение
+  const keep =
     target.closest('.cell') ||
     target.closest('#numPad') ||
+    target.closest('.num-btn') ||
     target.closest('.controls') ||
     target.closest('.topbar') ||
-    target.closest('.modal-content');
-  if (!inActiveArea) {
-    if (selectedCell || digitHighlightN !== null) {
+    target.closest('.modal-content') ||
+    target.closest('.modal') ||
+    target.closest('#feedbackBtn') ||
+    target.closest('.auth-btn');
+  if (!keep) {
+    if (selectedCell || selectedDigit !== null || digitHighlightN !== null) {
       selectedCell = null;
       clearDigitHighlight();
       highlightSelection();
     }
   }
-});
+}, true); // capture — срабатывает первым
 $('soundBtn')?.addEventListener('click', () => {
   toggleSound();
   if (soundEnabled) playClick();
