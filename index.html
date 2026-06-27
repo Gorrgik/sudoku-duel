@@ -145,22 +145,49 @@
     // payload: { sub, email, name, picture, iat, exp }
     localStorage.setItem(GIS_SESSION_KEY, JSON.stringify(payload));
     // Обновляем currentUser и myUid (используются в остальном коде)
+    const userId = 'user_' + payload.email;
     currentUser = {
-      id: 'user_' + payload.email,
+      id: userId,
       email: payload.email,
       user_metadata: { name: payload.name, picture: payload.picture, sub: payload.sub, provider: 'google' }
     };
     myUid = currentUser.id;
     localStorage.setItem('sudoku_uid', myUid);
     // Сохраняем в таблицу users (uid, email, name)
-    try {
-      const sbRest = (typeof _SB_REST !== 'undefined') ? _SB_REST : 'https://iirydyaesqidmvpsmzfn.supabase.co/rest/v1';
-      const sbHdr = { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g', 'Content-Type': 'application/json' };
-      fetch(sbRest + '/users?uid=eq.' + encodeURIComponent(myUid), {
-        method: 'PATCH', headers: { ...sbHdr, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify({ uid: myUid, email: payload.email, name: payload.name, last_seen: new Date().toISOString() })
-      }).catch(() => {});
-    } catch (e) {}
+    // Если уже есть запись с этим email — берём ЕЁ имя, а не из Google
+    (async () => {
+      try {
+        const sbRest = (typeof _SB_REST !== 'undefined') ? _SB_REST : 'https://iirydyaesqidmvpsmzfn.supabase.co/rest/v1';
+        const sbHdr = { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g', 'Content-Type': 'application/json' };
+        // Сначала ищем существующую запись по email
+        const existR = await fetch(`${sbRest}/users?email=eq.${encodeURIComponent(payload.email)}&select=name,uid&limit=1`, { headers: sbHdr });
+        let savedName = payload.name;
+        let existingUid = null;
+        if (existR.ok) {
+          const rows = await existR.json();
+          if (rows.length > 0 && rows[0].name) {
+            savedName = rows[0].name;
+            existingUid = rows[0].uid;
+          }
+        }
+        // Обновляем currentUser с актуальным именем
+        currentUser.user_metadata.name = savedName;
+        // Upsert в users
+        await fetch(sbRest + '/users?uid=eq.' + encodeURIComponent(userId), {
+          method: 'PATCH', headers: { ...sbHdr, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({ uid: userId, email: payload.email, name: savedName, last_seen: new Date().toISOString() })
+        });
+        // Если нашли запись с ДРУГИМ uid (старый google_<sub>) — мержим её
+        if (existingUid && existingUid !== userId) {
+          await fetch(sbRest + '/users?uid=eq.' + encodeURIComponent(existingUid), {
+            method: 'DELETE', headers: sbHdr
+          }).catch(() => {});
+        }
+        // Обновляем UI после слияния
+        window.dispatchEvent(new CustomEvent('auth_state_changed'));
+        try { updateAuthButton?.(); } catch (_) {}
+      } catch (e) {}
+    })();
     // Если имя пустое или совпадает с email частью — предложить выбрать ник
     const emailPart = (payload.email || '').split('@')[0];
     if (!payload.name || payload.name.toLowerCase() === emailPart.toLowerCase()) {
@@ -3452,23 +3479,41 @@ async function showEmailLoginStep2(email) {
       };
       localStorage.setItem(EMAIL_SESSION_KEY, JSON.stringify(session));
       // Имя по умолчанию — часть email до @
-      const defaultName = data.email.split('@')[0];
+      let defaultName = data.email.split('@')[0];
+      const userId = 'user_' + data.email;
       // Восстанавливаем сессию (currentUser + myUid)
       currentUser = {
-        id: 'user_' + data.email,
+        id: userId,
         email: data.email,
         user_metadata: { name: defaultName, email: data.email, provider: 'email' }
       };
       myUid = currentUser.id;
       localStorage.setItem('sudoku_uid', myUid);
-      // Сохраняем в users
+      // Сохраняем в users + подтянем существующий ник из БД (если есть)
       try {
         const sbRest = 'https://iirydyaesqidmvpsmzfn.supabase.co/rest/v1';
         const sbHdr = { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g', 'Content-Type': 'application/json' };
-        await fetch(sbRest + '/users?uid=eq.' + encodeURIComponent(myUid), {
+        // Ищем существующую запись по email — берём её ник
+        const existR = await fetch(`${sbRest}/users?email=eq.${encodeURIComponent(data.email)}&select=name,uid&limit=1`, { headers: sbHdr });
+        let existingUid = null;
+        if (existR.ok) {
+          const rows = await existR.json();
+          if (rows.length > 0 && rows[0].name) {
+            defaultName = rows[0].name;
+            currentUser.user_metadata.name = defaultName;
+            existingUid = rows[0].uid;
+          }
+        }
+        await fetch(sbRest + '/users?uid=eq.' + encodeURIComponent(userId), {
           method: 'PATCH', headers: { ...sbHdr, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-          body: JSON.stringify({ uid: myUid, email: data.email, name: defaultName, last_seen: new Date().toISOString() })
+          body: JSON.stringify({ uid: userId, email: data.email, name: defaultName, last_seen: new Date().toISOString() })
         });
+        // Удаляем старую запись с другим uid (если была)
+        if (existingUid && existingUid !== userId) {
+          await fetch(sbRest + '/users?uid=eq.' + encodeURIComponent(existingUid), {
+            method: 'DELETE', headers: sbHdr
+          }).catch(() => {});
+        }
       } catch (e) {}
       window.dispatchEvent(new CustomEvent('auth_state_changed'));
       hideModal();
