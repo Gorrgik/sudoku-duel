@@ -10,6 +10,11 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect x='1' y='1' width='34' height='34' rx='5' fill='%231e293b' stroke='%2338bdf8' stroke-width='2'/%3E%3Cg stroke='%2364748b' stroke-width='0.5' opacity='0.7'%3E%3Cline x1='9' y1='2' x2='9' y2='34'/%3E%3Cline x1='17' y1='2' x2='17' y2='34'/%3E%3Cline x1='25' y1='2' x2='25' y2='34'/%3E%3Cline x1='2' y1='9' x2='34' y2='9'/%3E%3Cline x1='2' y1='17' x2='34' y2='17'/%3E%3Cline x1='2' y1='25' x2='34' y2='25'/%3E%3C/g%3E%3Cg stroke='%23cbd5e1' stroke-width='1.5'%3E%3Cline x1='13' y1='1' x2='13' y2='35'/%3E%3Cline x1='23' y1='1' x2='23' y2='35'/%3E%3Cline x1='1' y1='13' x2='35' y2='13'/%3E%3Cline x1='1' y1='23' x2='35' y2='23'/%3E%3C/g%3E%3Cg font-family='monospace' font-weight='bold' text-anchor='middle' font-size='7'%3E%3Ctext x='7' y='10' fill='%23cbd5e1'%3E5%3C/text%3E%3Ctext x='15' y='10' fill='%2338bdf8'%3E9%3C/text%3E%3Ctext x='23' y='10' fill='%23cbd5e1'%3E3%3C/text%3E%3Ctext x='7' y='18' fill='%2364748b'%3E7%3C/text%3E%3Ctext x='15' y='18' fill='%23cbd5e1'%3E2%3C/text%3E%3Ctext x='23' y='18' fill='%2322c55e'%3E1%3C/text%3E%3Ctext x='7' y='26' fill='%23cbd5e1'%3E4%3C/text%3E%3Ctext x='15' y='26' fill='%2364748b'%3E8%3C/text%3E%3Ctext x='23' y='26' fill='%23f59e0b'%3E6%3C/text%3E%3C/g%3E%3C/svg%3E">
 <meta name="theme-color" content="#38bdf8">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+  // Google Identity Services Client ID
+  const GOOGLE_CLIENT_ID = '703004757035-jvpof39ukj5stmalftmg6t9rnd3soje6.apps.googleusercontent.com';
+</script>
 <script>
 (function() {
   // Supabase Auth
@@ -157,7 +162,105 @@
     return { isLoggedIn: !!currentUser, user: currentUser };
   }
 
+  // ── Google Identity Services (GIS) — своя аутентификация ──
+  // Хранит сессию в localStorage (gis_session). Не зависит от Supabase Auth.
+  const GIS_SESSION_KEY = 'gis_session';
+
+  function gisDecodeJwt(token) {
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = payload + '='.repeat((4 - payload.length % 4) % 4);
+      return JSON.parse(atob(padded));
+    } catch (e) { return null; }
+  }
+
+  function gisSaveSession(payload) {
+    // payload: { sub, email, name, picture, iat, exp }
+    localStorage.setItem(GIS_SESSION_KEY, JSON.stringify(payload));
+    // Обновляем currentUser и myUid (используются в остальном коде)
+    currentUser = {
+      id: 'google_' + payload.sub,
+      email: payload.email,
+      user_metadata: { name: payload.name, picture: payload.picture, sub: payload.sub, provider: 'google' }
+    };
+    myUid = currentUser.id;
+    localStorage.setItem('sudoku_uid', myUid);
+    // Сохраняем в таблицу users (uid, email, name)
+    fetch(_SB_URL_REPLACE_ME || 'https://iirydyaesqidmvpsmzfn.supabase.co', { method: 'GET' }); // no-op
+    try {
+      const sbRest = (typeof _SB_REST !== 'undefined') ? _SB_REST : 'https://iirydyaesqidmvpsmzfn.supabase.co/rest/v1';
+      const sbHdr = { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g', 'Content-Type': 'application/json' };
+      fetch(sbRest + '/users?uid=eq.' + encodeURIComponent(myUid), {
+        method: 'PATCH', headers: { ...sbHdr, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ uid: myUid, email: payload.email, name: payload.name, last_seen: new Date().toISOString() })
+      }).catch(() => {});
+    } catch (e) {}
+    // Если имя пустое или совпадает с email частью — предложить выбрать ник
+    const emailPart = (payload.email || '').split('@')[0];
+    if (!payload.name || payload.name.toLowerCase() === emailPart.toLowerCase()) {
+      setTimeout(() => showChooseNicknameModal?.(), 600);
+    }
+    window.dispatchEvent(new CustomEvent('auth_state_changed'));
+  }
+
+  function gisLoadSession() {
+    try {
+      const raw = localStorage.getItem(GIS_SESSION_KEY);
+      if (!raw) return null;
+      const payload = JSON.parse(raw);
+      // Проверка срока (1 час)
+      if (payload.exp && Date.now() / 1000 > payload.exp + 3600) {
+        localStorage.removeItem(GIS_SESSION_KEY);
+        return null;
+      }
+      // Восстанавливаем currentUser и myUid
+      currentUser = {
+        id: 'google_' + payload.sub,
+        email: payload.email,
+        user_metadata: { name: payload.name, picture: payload.picture, sub: payload.sub, provider: 'google' }
+      };
+      myUid = currentUser.id;
+      localStorage.setItem('sudoku_uid', myUid);
+      window.dispatchEvent(new CustomEvent('auth_state_changed'));
+      return payload;
+    } catch (e) { return null; }
+  }
+
+  function gisSignOut() {
+    localStorage.removeItem(GIS_SESSION_KEY);
+    try {
+      // Отзываем Google сессию
+      if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+        google.accounts.id.disableAutoSelect();
+      }
+    } catch (e) {}
+    currentUser = null;
+    // Сохраняем анонимный uid если нет
+    if (!localStorage.getItem('sudoku_uid')) {
+      const rnd = crypto.getRandomValues(new Uint8Array(8));
+      myUid = Array.from(rnd).map(b => b.toString(36).padStart(2, '0')).join('');
+      localStorage.setItem('sudoku_uid', myUid);
+    } else {
+      // НЕ сбрасываем sudoku_uid — пользователь может захотеть вернуться
+    }
+    window.dispatchEvent(new CustomEvent('auth_state_changed'));
+  }
+
+  // Колбэк GIS (вызывается из GIS после успешного входа)
+  window.gisCredentialCallback = function(response) {
+    const payload = gisDecodeJwt(response.credential);
+    if (!payload || !payload.sub) { alert('Ошибка входа через Google'); return; }
+    gisSaveSession(payload);
+    hideModal();
+    location.reload();
+  };
+
   initSupabase();
+
+  // Пробуем восстановить GIS сессию из localStorage (своя аутентификация)
+  gisLoadSession();
 
   // Fallback: если нет UID и не залогинены — создаём анонимный
   if (!localStorage.getItem('sudoku_uid') && !currentUser) {
@@ -3122,11 +3225,18 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
       const user = window.FB?.getCurrentUser();
       const name = user?.user_metadata?.name || user?.email || '?';
       if (!confirm(`Выйти из аккаунта «${name}»?`)) return;
+      // Определяем способ аутентификации
+      const isGis = localStorage.getItem('gis_session');
       try {
-        await window.FB.signOut();
-        hideModal();
-        // Жёсткая перезагрузка с очисткой кэша — иначе Supabase OAuth ломается при повторном входе
-        location.replace(location.href.split('?')[0] + '?t=' + Date.now());
+        if (isGis) {
+          gisSignOut();
+          hideModal();
+          location.replace(location.href.split('?')[0] + '?t=' + Date.now());
+        } else {
+          await window.FB.signOut();
+          hideModal();
+          location.replace(location.href.split('?')[0] + '?t=' + Date.now());
+        }
       } catch (err) {
         alert('Ошибка выхода: ' + err.message);
       }
@@ -3147,7 +3257,16 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
           <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
           <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
         </svg>
-        Войти через Google
+        Войти через Google (Supabase)
+      </button>
+      <button class="btn" id="authGoogleGisBtn" style="width:100%;margin-bottom:12px;background:#fff;color:#333;font-weight:600;border:1px solid #dadce0;border-radius:8px;padding:10px 16px;">
+        <svg width="18" height="18" viewBox="0 0 18 18" style="vertical-align:middle;margin-right:8px;">
+          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+          <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
+          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+        </svg>
+        Войти через Google (GIS)
       </button>
       <div class="duel-or">или</div>
       <div class="cloud-fields">
@@ -3173,6 +3292,63 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
       $('authGoogleBtn').textContent = '⏳ Перенаправляем...';
       await window.FB.signInWithGoogle();
       hideModal();
+    });
+
+    // GIS — своя аутентификация через Google Identity Services
+    $('authGoogleGisBtn')?.addEventListener('click', () => {
+      $('authGoogleGisBtn').disabled = true;
+      $('authGoogleGisBtn').textContent = '⏳ Открываю окно Google...';
+      try {
+        if (typeof google === 'undefined' || !google.accounts) {
+          alert('Google SDK ещё загружается, подожди пару секунд и попробуй снова');
+          $('authGoogleGisBtn').disabled = false;
+          $('authGoogleGisBtn').innerHTML = 'Войти через Google (GIS)';
+          return;
+        }
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: 'openid email profile',
+          callback: (tokenResponse) => {
+            // access_token получен — теперь запрашиваем user info
+            fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { 'Authorization': 'Bearer ' + tokenResponse.access_token }
+            })
+            .then(r => r.json())
+            .then(profile => {
+              // profile: { sub, email, name, picture, email_verified }
+              if (!profile.sub) { alert('Не удалось получить профиль Google'); return; }
+              const payload = {
+                sub: profile.sub,
+                email: profile.email,
+                name: profile.name || profile.email.split('@')[0],
+                picture: profile.picture,
+                iat: Math.floor(Date.now() / 1000),
+                exp: Math.floor(Date.now() / 1000) + 3600
+              };
+              gisSaveSession(payload);
+              hideModal();
+              location.reload();
+            })
+            .catch(err => {
+              console.error(err);
+              alert('Ошибка получения профиля Google');
+              $('authGoogleGisBtn').disabled = false;
+              $('authGoogleGisBtn').innerHTML = 'Войти через Google (GIS)';
+            });
+          },
+          error_callback: (err) => {
+            console.error('GIS error:', err);
+            $('authGoogleGisBtn').disabled = false;
+            $('authGoogleGisBtn').innerHTML = 'Войти через Google (GIS)';
+          }
+        });
+        client.requestAccessToken();
+      } catch (e) {
+        console.error(e);
+        alert('Ошибка инициализации Google: ' + e.message);
+        $('authGoogleGisBtn').disabled = false;
+        $('authGoogleGisBtn').innerHTML = 'Войти через Google (GIS)';
+      }
     });
 
     $('authEmailBtn')?.addEventListener('click', async () => {
