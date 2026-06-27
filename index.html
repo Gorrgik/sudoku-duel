@@ -2560,16 +2560,24 @@ function showGameScreen() {
 }
 
 function renderBoard() {
-  // Защита: если state не инициализирован — рендерим пустую доску вместо краша
-  if (!state || !state.puzzle || !Array.isArray(state.puzzle) || !state.puzzle[0]) {
-    const board = $('board');
-    if (board) board.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-dim);">Доска не загружена</div>';
+  // Жёсткая защита: если любая часть state битая — показываем заглушку, не падаем
+  const board = $('board');
+  if (!board) return;
+  if (!state || !state.puzzle || !Array.isArray(state.puzzle) || state.puzzle.length !== 9 ||
+      !state.user || !Array.isArray(state.user) || state.user.length !== 9 ||
+      !state.solution || !Array.isArray(state.solution) || state.solution.length !== 9) {
+    board.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-dim);">⏳ Доска загружается...</div>';
+    console.warn('[SUDOKU] renderBoard: state не инициализирован', state);
     return;
   }
-  const board = $('board');
   board.innerHTML = '';
   clearDigitHighlight();
   for (let r = 0; r < 9; r++) {
+    const puzzleRow = state.puzzle[r] || [];
+    const userRow = state.user[r] || [];
+    const solutionRow = state.solution[r] || [];
+    const errorsRow = (state.errors && state.errors[r]) || [];
+    const notesRow = (state.notes && state.notes[r]) || [];
     for (let c = 0; c < 9; c++) {
       const cell = document.createElement('div');
       cell.className = 'cell';
@@ -2580,20 +2588,20 @@ function renderBoard() {
       if (c % 3 === 0) cell.classList.add('bl');
       if (c === 8) cell.classList.add('br');
 
-      const isFixed = state.puzzle[r][c] !== 0;
-      const val = state.user[r][c];
+      const isFixed = puzzleRow[c] !== 0;
+      const val = userRow[c];
       if (isFixed) {
         cell.classList.add('fixed');
-        cell.textContent = state.puzzle[r][c];
+        cell.textContent = puzzleRow[c];
       } else if (val !== 0) {
         cell.classList.add('user');
-        if (state.errors[r][c]) cell.classList.add('error');
-        if (val === state.solution[r][c]) cell.classList.add('locked');
+        if (errorsRow[c]) cell.classList.add('error');
+        if (val === solutionRow[c]) cell.classList.add('locked');
         cell.textContent = val;
       } else {
         // Показываем карандашные заметки
-        const notes = state.notes[r][c];
-        if (notes && notes.length > 0) {
+        const notes = notesRow[c] || [];
+        if (notes.length > 0) {
           const notesEl = document.createElement('div');
           notesEl.className = 'cell-notes';
           for (let n = 1; n <= 9; n++) {
@@ -6511,17 +6519,22 @@ function startDailyGame(challenge) {
     alert('Ошибка данных задания. Попробуй ещё раз.');
     return;
   }
-  board = puzzle.map(r => r.slice());
+  // Правильный формат state — как в обычной игре (user/errors/notes)
   state = {
-    puzzle, solution, board,
-    started: true,
+    level: 'easy',
+    puzzle,
+    solution,
+    user: puzzle.map(row => row.slice()),
+    errors: Array.from({length: 9}, () => Array(9).fill(false)),
+    notes: Array.from({length: 9}, () => Array.from({length: 9}, () => [])),
     pencilMode: false,
+    started: true,
+    startedAt: Date.now(),
     selected: null,
     errors: 0,
     maxErrors: 999,
     hints: 0,
-    seconds: 0,
-    level: 'easy'
+    seconds: 0
   };
   selectedCell = null;
   selectedDigit = null;
