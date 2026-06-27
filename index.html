@@ -47,7 +47,9 @@
         console.log('[SUDOKU] Auth event:', event, session ? 'session exists' : 'no session');
         // Если уже залогинены через GIS или email — не трогаем currentUser
         if (!session && (localStorage.getItem('gis_session') || localStorage.getItem('email_session'))) {
-          console.log('[SUDOKU] Custom session present, skip Supabase null-reset');
+          console.log('[SUDOKU] Custom session present, restore from localStorage');
+          try { loadEmailSession(); } catch (_) {}
+          try { window.gisLoadSession?.(); } catch (_) {}
           return;
         }
         if (session && session.user) {
@@ -3427,9 +3429,11 @@ async function showEmailLoginStep2(email) {
 function loadEmailSession() {
   try {
     const raw = localStorage.getItem(EMAIL_SESSION_KEY);
+    console.log('[SUDOKU] loadEmailSession raw:', raw ? raw.slice(0, 100) : 'NULL');
     if (!raw) return null;
     const sess = JSON.parse(raw);
     if (new Date(sess.expires_at) < new Date()) {
+      console.log('[SUDOKU] email session expired, removing');
       localStorage.removeItem(EMAIL_SESSION_KEY);
       return null;
     }
@@ -3440,9 +3444,10 @@ function loadEmailSession() {
     };
     myUid = currentUser.id;
     localStorage.setItem('sudoku_uid', myUid);
+    console.log('[SUDOKU] email session restored for:', sess.email, 'uid:', myUid);
     window.dispatchEvent(new CustomEvent('auth_state_changed'));
     return sess;
-  } catch (e) { return null; }
+  } catch (e) { console.warn('[SUDOKU] loadEmailSession error:', e); return null; }
 }
 
 // Auth button clicks — обработчик добавлен ниже вместе с долгим нажатием (line ~4318)
