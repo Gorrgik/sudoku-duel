@@ -3169,26 +3169,30 @@ function showWinModal({ level, elapsed, errorCount, moves }) {
   $('saveRecBtn').addEventListener('click', async () => {
     const name = $('playerName').value.trim().slice(0, 30) || 'Аноним';
     localStorage.setItem('sudoku_last_name', name);
-    // Обновляем запись — пересохраняем с новым именем (удаляем старую с дефолтом)
-    const records = loadRecords();
-    // Удаляем только что добавленную запись с дефолтным именем
-    if (records.length) {
-      records.shift();
-      localStorage.setItem(RECORDS_KEY, JSON.stringify(records));
-    }
-    await saveRecord({
-      name,
-      level: level,
-      seconds: elapsed,
-      errors: errorCount,
-      moves: moves,
-      date: new Date().toISOString()
-    });
-    // Проверка ачивок за рекорд
-    checkAchievements({ type: 'record', level });
-    // Если это был Daily Challenge — отправляем результат
-    if (window._dailyInProgress) {
+    // Если это Daily Challenge — НЕ сохраняем в обычную таблицу рекордов
+    if (!window._dailyInProgress) {
+      const records = loadRecords();
+      if (records.length) {
+        records.shift();
+        localStorage.setItem(RECORDS_KEY, JSON.stringify(records));
+      }
+      await saveRecord({
+        name,
+        level: level,
+        seconds: elapsed,
+        errors: errorCount,
+        moves: moves,
+        date: new Date().toISOString()
+      });
+      checkAchievements({ type: 'record', level });
+    } else {
+      // Для Daily Challenge — ачивка за прохождение (без single_easy и т.п.)
+      checkAchievements({ type: 'daily_complete' });
       window._dailyInProgress = false;
+    }
+    // Отправляем результат в daily_results ТОЛЬКО ОДИН РАЗ
+    if (!window._dailySubmitted) {
+      window._dailySubmitted = true;
       submitDailyResult();
     }
     showRecordsModal();
@@ -6477,31 +6481,37 @@ async function showDailyChallengeModal() {
   if (!window.FB.isReady()) { alert('Загрузка...'); return; }
 
   forceHideModal();
+  // Загружаем инфу ДО рендера модалки — нужно знать, играл ли уже сегодня
+  const [leaderboard, myResult] = await Promise.all([
+    window.FB.getDailyLeaderboard(100),
+    window.FB.getMyDailyResult()
+  ]);
+
+  // Если уже прошёл сегодня — кнопка "Начать" заблокирована
+  const alreadyDone = !!myResult;
+
   const modal = $('modalContent');
   modal.innerHTML = `
     <div class="duel-modal-step">
       <h2>📅 Daily Challenge</h2>
       <div class="modal-sub">Одна доска для всех игроков мира.<br>Покажи лучшее время!</div>
       <div id="dailyInfo" style="margin:14px 0;font-size:0.85rem;color:var(--text-dim);">
-        <div>Участников сегодня: <span id="dailyCount">...</span></div>
-        <div>Твоё время: <span id="dailyMyTime">—</span></div>
+        <div>Участников сегодня: <span id="dailyCount">${leaderboard.length}</span></div>
+        <div>Твоё время: <span id="dailyMyTime">${myResult ? formatTime(myResult.time_seconds) : '—'}</span></div>
+        ${alreadyDone ? '<div style="color:var(--good);margin-top:6px;">✅ Ты уже прошёл сегодня!</div>' : ''}
       </div>
-      <button class="btn primary" id="dailyStartBtn" style="width:100%;margin-bottom:8px;">▶ Начать</button>
+      <button class="btn primary" id="dailyStartBtn" style="width:100%;margin-bottom:8px;" ${alreadyDone ? 'disabled' : ''}>${alreadyDone ? '✅ Пройдено' : '▶ Начать'}</button>
       <button class="btn ghost" id="dailyLbBtn" style="width:100%;margin-bottom:8px;">🏆 Лидерборд</button>
       <div style="margin-top:14px;"><button class="btn ghost" id="dailyCloseBtn">← Назад</button></div>
     </div>
   `;
   showModal();
 
-  // Загружаем инфу
-  const [leaderboard, myResult] = await Promise.all([
-    window.FB.getDailyLeaderboard(100),
-    window.FB.getMyDailyResult()
-  ]);
-  $('dailyCount').textContent = leaderboard.length;
-  $('dailyMyTime').textContent = myResult ? formatTime(myResult.time_seconds) : '—';
-
   $('dailyStartBtn').addEventListener('click', async () => {
+    if (alreadyDone) {
+      alert('Ты уже прошёл Daily Challenge сегодня. Возвращайся завтра!');
+      return;
+    }
     const challenge = await window.FB.getDailyChallenge();
     if (!challenge) { alert('Не удалось загрузить задание'); return; }
     startDailyGame(challenge);
@@ -6545,7 +6555,7 @@ function startDailyGame(challenge) {
   }
   // Правильный формат state — как в обычной игре (user/errors/notes)
   state = {
-    level: 'easy',
+    level: 'daily',
     puzzle,
     solution,
     user: puzzle.map(row => row.slice()),
@@ -6555,9 +6565,9 @@ function startDailyGame(challenge) {
     started: true,
     startedAt: Date.now(),
     selected: null,
-    errors: 0,
-    maxErrors: 999,
-    hints: 0,
+    errorCount: 0,
+    maxErrors: 3,
+    hints: 999,
     seconds: 0
   };
   selectedCell = null;
