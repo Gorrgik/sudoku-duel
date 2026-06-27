@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://gorrgik.github.io/sudoku-duel/sitemap.xml

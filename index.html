@@ -12,6 +12,11 @@
 <meta name="author" content="Sudoku Duel">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="https://gorrgik.github.io/sudoku-duel/">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sudoku Duel">
 
 <!-- Open Graph (для красивого шеринга в VK, Telegram, Facebook) -->
 <meta property="og:type" content="website">
@@ -2155,6 +2160,17 @@ const RECORDS_KEY = 'sudoku_records_v1';
 // Firebase: ждём готовности
 let fbReady = false;
 window.addEventListener('firebase_ready', () => { fbReady = true; });
+
+// === PWA: регистрация Service Worker ===
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+      console.log('[PWA] SW registered:', reg.scope);
+    }).catch(err => {
+      console.warn('[PWA] SW registration failed:', err);
+    });
+  });
+}
 
 // === Telegram Mini App ===
 // Если открыто внутри Telegram — разворачиваем на весь экран и пробуем автологин по initData
