@@ -50,7 +50,8 @@
           console.log('[SUDOKU] Custom session present, restore from localStorage');
           try { loadEmailSession(); } catch (_) {}
           try { window.gisLoadSession?.(); } catch (_) {}
-          try { updateAuthButton?.(); } catch (_) {}
+          // updateAuthButton определена ниже — отложим вызов
+          setTimeout(() => { try { updateAuthButton?.(); } catch (_) {} }, 0);
           return;
         }
         if (session && session.user) {
@@ -3446,6 +3447,8 @@ function loadEmailSession() {
     myUid = currentUser.id;
     localStorage.setItem('sudoku_uid', myUid);
     console.log('[SUDOKU] email session restored for:', sess.email, 'uid:', myUid);
+    // Отложим update — функция определена ниже в коде
+    setTimeout(() => { try { updateAuthButton?.(); } catch (_) {} }, 0);
     window.dispatchEvent(new CustomEvent('auth_state_changed'));
     return sess;
   } catch (e) { console.warn('[SUDOKU] loadEmailSession error:', e); return null; }
