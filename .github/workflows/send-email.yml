@@ -1,59 +1,46 @@
-name: Send email code (Gmail SMTP)
-
+name: Send email code
 on:
   schedule:
     - cron: '*/2 * * * *'
   workflow_dispatch:
-
 jobs:
   send:
     runs-on: ubuntu-latest
     steps:
-      - name: Send pending emails
+      - name: Send
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: |
-          python3 << 'PYEOF'
-          import os, json, smtplib
+          python3 -c "
+          import os,json,smtplib
           from email.mime.text import MIMEText
           from email.mime.multipart import MIMEMultipart
           from urllib import request
-
-          SUPABASE_URL = os.environ['SUPABASE_URL']
-          SRK = os.environ['SUPABASE_SERVICE_ROLE_KEY']
-          GMAIL_USER = os.environ['GMAIL_USER']
-          GMAIL_APP_PASSWORD = os.environ['GMAIL_APP_PASSWORD']
-          HDR = {'apikey': SRK, 'Authorization': f'Bearer {SRK}', 'Content-Type': 'application/json'}
-
-          def http_get(p):
-              r = request.Request(SUPABASE_URL + p, headers=HDR)
-              with request.urlopen(r, timeout=10) as resp: return json.loads(resp.read())
-          def http_delete(p):
-              r = request.Request(SUPABASE_URL + p, headers=HDR, method='DELETE')
-              with request.urlopen(r, timeout=10) as resp: return resp.read()
-
-          rows = http_get('/rest/v1/pending_emails?select=id,email,code&order=created_at.asc&limit=10')
-          print(f'Found {len(rows)} pending emails')
-          for row in rows:
-              try:
-                  msg = MIMEMultipart('alternative')
-                  msg['From'] = f'Sudoku Duel <{GMAIL_USER}>'
-                  msg['To'] = row['email']
-                  msg['Subject'] = '🔢 Код входа в Sudoku Duel'
-                  html = f'''<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1e293b;color:#f1f5f9;border-radius:12px;">
-                  <h2 style="color:#38bdf8;margin:0 0 16px">Sudoku Duel</h2>
-                  <p>Ваш код для входа:</p>
-                  <div style="font-size:2.5rem;font-weight:bold;letter-spacing:8px;color:#38bdf8;text-align:center;padding:24px;background:#0f172a;border-radius:8px;margin:16px 0;">{row['code']}</div>
-                  <p style="color:#94a3b8;font-size:0.9rem;">Код действителен 10 минут.</p></div>'''
-                  msg.attach(MIMEText(html, 'html'))
-                  with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10) as s:
-                      s.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-                      s.send_message(msg)
-                  print(f'Sent to {row["email"]}')
-                  http_delete(f'/rest/v1/pending_emails?id=eq.{row["id"]}')
-              except Exception as e:
-                  print(f'Failed {row["email"]}: {e}')
-          PYEOF
+          U=os.environ['SUPABASE_URL']
+          K=os.environ['SUPABASE_SERVICE_ROLE_KEY']
+          G=os.environ['GMAIL_USER']
+          P=os.environ['GMAIL_APP_PASSWORD']
+          H={'apikey':K,'Authorization':f'Bearer {K}','Content-Type':'application/json'}
+          r=request.Request(U+'/rest/v1/pending_emails?select=id,email,code&order=created_at.asc&limit=10',headers=H)
+          rows=json.loads(request.urlopen(r,timeout=10).read())
+          print(f'Found {len(rows)}')
+          for x in rows:
+            try:
+              m=MIMEMultipart('alternative')
+              m['From']=f'Sudoku Duel <{G}>'
+              m['To']=x['email']
+              m['Subject']='Код входа в Sudoku Duel'
+              h=f'<div style=\"font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#1e293b;color:#f1f5f9;border-radius:12px;\"><h2 style=\"color:#38bdf8\">Sudoku Duel</h2><p>Код:</p><div style=\"font-size:2.5rem;font-weight:bold;letter-spacing:8px;color:#38bdf8;text-align:center;padding:24px;background:#0f172a;border-radius:8px;margin:16px 0;\">{x[\"code\"]}</div><p style=\"color:#94a3b8;font-size:0.9rem;\">Код 10 минут.</p></div>'
+              m.attach(MIMEText(h,'html'))
+              with smtplib.SMTP_SSL('smtp.gmail.com',465,timeout=10) as s:
+                s.login(G,P)
+                s.send_message(m)
+              d=request.Request(U+'/rest/v1/pending_emails?id=eq.'+str(x['id']),headers=H,method='DELETE')
+              request.urlopen(d,timeout=10).read()
+              print('Sent to',x['email'])
+            except Exception as e:
+              print('Failed',x['email'],e)
+          "
