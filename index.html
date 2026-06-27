@@ -412,15 +412,52 @@
   }
 
   // ── Public API ─────────────────────────────────────────────────────
+  // Гибридное чтение сессии — если в IIFE currentUser пуст, читает из localStorage
+  function _readSession() {
+    try {
+      const raw = localStorage.getItem('email_session');
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.email && (!s.expires_at || new Date(s.expires_at) > new Date())) {
+          return {
+            id: 'email_' + s.email,
+            email: s.email,
+            user_metadata: { name: s.email.split('@')[0], email: s.email, provider: 'email' }
+          };
+        }
+      }
+      const gis = localStorage.getItem('gis_session');
+      if (gis) {
+        const s = JSON.parse(gis);
+        if (s.sub) {
+          return {
+            id: 'google_' + s.sub,
+            email: s.email,
+            user_metadata: { name: s.name || s.email?.split('@')[0], picture: s.picture, sub: s.sub, provider: 'google' }
+          };
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
   window.FB = {
     isRtdbOk: () => sbOk,
     isReady: () => fbReady && !isAuthLoading,
-    isSignedIn: () => !!currentUser,
+    isSignedIn: () => !!currentUser || !!localStorage.getItem('email_session') || !!localStorage.getItem('gis_session'),
     isAuthLoading: () => isAuthLoading,
-    getMyUid: () => myUid,
-    getMyName: () => (myName && myName.trim()) || currentUser?.user_metadata?.name || currentUser?.email?.split('@')[0] || 'Игрок',
+    getMyUid: () => {
+      if (myUid) return myUid;
+      const u = _readSession();
+      return u?.id || localStorage.getItem('sudoku_uid') || '';
+    },
+    getMyName: () => {
+      if (myName && myName.trim()) return myName;
+      const u = currentUser || _readSession();
+      return u?.user_metadata?.name || u?.email?.split('@')[0] || 'Игрок';
+    },
     setMyName: n => { myName = String(n).trim().slice(0, 20); localStorage.setItem('sudoku_duel_name', myName); },
-    getCurrentUser: () => currentUser,
+    getCurrentUser: () => currentUser || _readSession(),
     signInWithGoogle: () => alert('Supabase Auth удалён. Используйте Google (GIS) кнопку.'),
     signInWithEmail: () => ({ error: { message: 'Supabase Auth удалён' } }),
     signUpWithEmail: () => ({ error: { message: 'Supabase Auth удалён' } }),
@@ -3447,6 +3484,8 @@ function loadEmailSession() {
     myUid = currentUser.id;
     localStorage.setItem('sudoku_uid', myUid);
     console.log('[SUDOKU] email session restored for:', sess.email, 'uid:', myUid);
+    // Также обновим IIFE currentUser через _readSession если она доступна
+    try { window.FB?.getCurrentUser?.(); } catch (_) {}
     // Отложим update — функция определена ниже в коде
     setTimeout(() => { try { updateAuthButton?.(); } catch (_) {} }, 0);
     window.dispatchEvent(new CustomEvent('auth_state_changed'));
