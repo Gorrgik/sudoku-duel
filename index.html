@@ -166,7 +166,8 @@
   // Хранит сессию в localStorage (gis_session). Не зависит от Supabase Auth.
   const GIS_SESSION_KEY = 'gis_session';
 
-  function gisDecodeJwt(token) {
+  // Делаем функции глобальными — обработчик кнопки authGoogleGisBtn вне IIFE
+  window.gisDecodeJwt = function gisDecodeJwt(token) {
     try {
       const parts = token.split('.');
       if (parts.length !== 3) return null;
@@ -256,6 +257,11 @@
     hideModal();
     location.reload();
   };
+
+  // Глобальные обёртки (для обработчика кнопки authGoogleGisBtn)
+  window.gisSaveSession = gisSaveSession;
+  window.gisSignOut = gisSignOut;
+  window.gisLoadSession = gisLoadSession;
 
   initSupabase();
 
