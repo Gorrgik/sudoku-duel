@@ -45,6 +45,11 @@
 
       supabase.auth.onAuthStateChange(async (event, session) => {
         console.log('[SUDOKU] Auth event:', event, session ? 'session exists' : 'no session');
+        // Если уже залогинены через GIS — не трогаем currentUser (Supabase не знает про эту сессию)
+        if (!session && localStorage.getItem('gis_session')) {
+          console.log('[SUDOKU] GIS session present, skip Supabase null-reset');
+          return;
+        }
         if (session && session.user) {
           currentUser = session.user;
           myUid = session.user.id;
