@@ -370,10 +370,14 @@
   // board/puzzle могут прийти как ["0 0 0...", ...] или [[0,0,0...], ...] — возвращаем всегда [[0,0,0...], ...]
   function parseBoard(raw) {
     if (!raw) return null;
-    if (Array.isArray(raw) && raw[0]) {
+    // Supabase иногда возвращает jsonb как строку — распарсим
+    if (typeof raw === 'string') {
+      try { raw = JSON.parse(raw); } catch (e) { return null; }
+    }
+    if (Array.isArray(raw) && raw.length > 0) {
       if (Array.isArray(raw[0])) return raw;
       return raw.map(row => {
-        if (typeof row === 'string') return row.split(' ').map(Number);
+        if (typeof row === 'string') return row.split(/[\s,]+/).filter(Boolean).map(Number);
         return row;
       });
     }
@@ -912,13 +916,22 @@
     // ===== Daily Challenge =====
     async getDailyChallenge() {
       if (!sbOk) return null;
-      const today = new Date();
-      const yyyymmdd = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      // Используем МСК (UTC+3) — все игроки получают одну и ту же дату
+      const now = new Date();
+      const msk = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+      const yyyymmdd = msk.getUTCFullYear() * 10000 + (msk.getUTCMonth() + 1) * 100 + msk.getUTCDate();
+      const dateStr = `${msk.getUTCFullYear()}-${String(msk.getUTCMonth() + 1).padStart(2, '0')}-${String(msk.getUTCDate()).padStart(2, '0')}`;
       try {
         const existing = await sbGet('daily_challenges', `date=eq.${dateStr}&limit=1`);
-        if (existing && existing[0]) return existing[0];
-        // Генерируем через существующую функцию (должна быть в глобале)
+        if (existing && existing[0]) {
+          // На случай если Supabase вернул jsonb как строку — парсим
+          let puz = existing[0].puzzle;
+          let sol = existing[0].solution;
+          if (typeof puz === 'string') { try { puz = JSON.parse(puz); } catch (_) {} }
+          if (typeof sol === 'string') { try { sol = JSON.parse(sol); } catch (_) {} }
+          return { ...existing[0], puzzle: puz, solution: sol };
+        }
+        // Генерируем через существующую функцию
         const gen = (typeof generateSeededPuzzle === 'function')
           ? generateSeededPuzzle(String(yyyymmdd), 38)
           : (typeof generatePuzzle === 'function' ? generatePuzzle(38) : null);
@@ -931,8 +944,9 @@
 
     async submitDailyResult(uid, name, timeSeconds, errors) {
       if (!sbOk || !uid) return null;
-      const today = new Date();
-      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const now = new Date();
+      const msk = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+      const dateStr = `${msk.getUTCFullYear()}-${String(msk.getUTCMonth() + 1).padStart(2, '0')}-${String(msk.getUTCDate()).padStart(2, '0')}`;
       try {
         const row = { date: dateStr, uid, name: (name || 'Игрок').slice(0, 20), time_seconds: timeSeconds, errors: errors || 0 };
         await sbPost('daily_results', row);
@@ -942,8 +956,9 @@
 
     async getDailyLeaderboard(limit = 50) {
       if (!sbOk) return [];
-      const today = new Date();
-      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const now = new Date();
+      const msk = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+      const dateStr = `${msk.getUTCFullYear()}-${String(msk.getUTCMonth() + 1).padStart(2, '0')}-${String(msk.getUTCDate()).padStart(2, '0')}`;
       try {
         const rows = await sbGet('daily_results', `date=eq.${dateStr}&order=time_seconds.asc&limit=${limit}`);
         return rows || [];
@@ -952,8 +967,9 @@
 
     async getMyDailyResult() {
       if (!sbOk || !myUid) return null;
-      const today = new Date();
-      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const now = new Date();
+      const msk = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+      const dateStr = `${msk.getUTCFullYear()}-${String(msk.getUTCMonth() + 1).padStart(2, '0')}-${String(msk.getUTCDate()).padStart(2, '0')}`;
       try {
         const rows = await sbGet('daily_results', `date=eq.${dateStr}&uid=eq.${myUid}&limit=1`);
         return rows && rows[0] ? rows[0] : null;
@@ -6352,11 +6368,11 @@ function getDailyStreak() {
 function recordDailyCompletion() {
   try {
     const dates = JSON.parse(localStorage.getItem('sudoku_daily_dates') || '[]');
-    const today = new Date();
-    const ds = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const now = new Date();
+    const msk = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+    const ds = `${msk.getUTCFullYear()}-${String(msk.getUTCMonth() + 1).padStart(2, '0')}-${String(msk.getUTCDate()).padStart(2, '0')}`;
     if (!dates.includes(ds)) {
       dates.push(ds);
-      // Храним последние 30 дней
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - 30);
       const filtered = dates.filter(d => new Date(d) >= cutoff);
@@ -6469,6 +6485,10 @@ async function showDailyChallengeModal() {
 }
 
 function startDailyGame(challenge) {
+  if (!challenge || !challenge.puzzle || !challenge.solution) {
+    alert('Не удалось загрузить задание. Попробуй ещё раз.');
+    return;
+  }
   dailyCompleted = false;
   dailyErrors = 0;
   dailyErrorsGlobal = 0;
@@ -6480,6 +6500,10 @@ function startDailyGame(challenge) {
   // Используем существующую логику одиночной игры с заданной доской
   puzzle = parseBoard(challenge.puzzle);
   solution = parseBoard(challenge.solution);
+  if (!puzzle || !solution) {
+    alert('Ошибка данных задания. Попробуй ещё раз.');
+    return;
+  }
   board = puzzle.map(r => r.slice());
   state = {
     puzzle, solution, board,
