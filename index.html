@@ -5848,7 +5848,6 @@ async function showDuelMenu() {
 
   $('duelMenuCloseBtn').addEventListener('click', () => {
     $('modal').classList.remove('no-overlay-close');
-    $('duelMenuCloseBtn').addEventListener('click', () => {
     // Полная очистка: модалка + дуэль-state + matchmaking + обычная state
     window.FB?.leaveQueue?.();
     duelCode = null; duelBoard = null; duelPuzzle = null; duelSolution = null;
