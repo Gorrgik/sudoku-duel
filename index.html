@@ -3039,7 +3039,32 @@ function showAuthModal() {
     };
     document.getElementById('authChangeNameBtn')?.addEventListener('click', showInput);
     document.getElementById('authCancelNameBtn')?.addEventListener('click', hideInput);
-    document.getElementById('authSaveNameBtn')?.addEventListener('click', async () => {
+    // Обновить name во ВСЕХ таблицах по email/uid (после смены ника)
+async function updateNameEverywhere(uid, email, newName) {
+  const filter = email ? `email=eq.${encodeURIComponent(email)}` : `uid=eq.${uid}`;
+  const tables = ['duel_ratings', 'single_records', 'rating_history', 'matchmaking', 'duel_queue'];
+  for (const t of tables) {
+    try {
+      await fetch(`${_SB_REST}/${t}?${filter}`, {
+        method: 'PATCH', headers: _SB_HDR, mode: 'cors',
+        body: JSON.stringify({ name: newName })
+      });
+    } catch (e) { console.warn(`update name in ${t} failed:`, e); }
+  }
+  // Fallback по uid (если email не заполнен в каких-то строках)
+  if (email) {
+    for (const t of tables) {
+      try {
+        await fetch(`${_SB_REST}/${t}?uid=eq.${uid}`, {
+          method: 'PATCH', headers: _SB_HDR, mode: 'cors',
+          body: JSON.stringify({ name: newName })
+        });
+      } catch (e) {}
+    }
+  }
+}
+
+document.getElementById('authSaveNameBtn')?.addEventListener('click', async () => {
       const input = document.getElementById('authNewNameInput');
       const newName = (input?.value || '').trim();
       if (!newName) { alert('Имя не может быть пустым'); return; }
@@ -3048,14 +3073,19 @@ function showAuthModal() {
       btn.disabled = true; btn.textContent = '⏳...';
       // Сохраняем в localStorage (приоритет над user_metadata)
       window.FB.setMyName(newName);
-      // Обновляем в Supabase duel_ratings (если есть запись)
+      const myUid = window.FB.getMyUid();
+      const myEmail = window.FB.getCurrentUser()?.email || '';
+      // Обновляем в Supabase user_metadata
+      try { await supabase.auth.updateUser({ data: { name: newName } }); } catch(e) {}
+      // Обновляем в users
       try {
-        const myUid = window.FB.getMyUid();
-        await fetch(`${_SB_REST}/duel_ratings?uid=eq.${myUid}`, {
+        await fetch(`${_SB_REST}/users?uid=eq.${myUid}`, {
           method: 'PATCH', headers: _SB_HDR, mode: 'cors',
           body: JSON.stringify({ name: newName })
         });
-      } catch(e) { console.warn('не удалось обновить имя в duel_ratings', e); }
+      } catch(e) {}
+      // Обновляем во ВСЕХ связанных таблицах по email и uid
+      await updateNameEverywhere(myUid, myEmail, newName);
       // Обновляем UI
       const h2 = document.getElementById('authProfileName');
       if (h2) h2.textContent = newName;
@@ -3066,6 +3096,7 @@ function showAuthModal() {
       if (typeof duelMyName !== 'undefined' && $('myDuelName')) {
         $('myDuelName').textContent = newName;
       }
+      alert('✅ Ник обновлён везде: ' + newName);
       console.log('[SUDOKU] ник изменён на', newName);
     });
 
@@ -3405,13 +3436,17 @@ async function showAdminRatings() {
   actionsDiv.innerHTML = '';
 
   try {
-    // Загружаем рейтинги + баны параллельно. Только залогиненные (UUID содержит дефисы), без забаненных
-    const [data, banned] = await Promise.all([
+    // Загружаем рейтинги + баны + актуальные ники из users — параллельно. Только залогиненные (UUID содержит дефисы)
+    const [data, banned, users] = await Promise.all([
       fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins&uid=like.*-*&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' })
         .then(r => r.ok ? r.json() : []).catch(() => []),
       fetch(`${_SB_REST}/banned_users?select=uid`, { method: 'GET', headers: _SB_HDR, mode: 'cors' })
+        .then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch(`${_SB_REST}/users?select=uid,name`, { method: 'GET', headers: _SB_HDR, mode: 'cors' })
         .then(r => r.ok ? r.json() : []).catch(() => [])
     ]);
+    // Map uid → актуальный ник из users (приоритет над name в duel_ratings)
+    const usersMap = new Map((users || []).map(u => [u.uid, u.name]));
     const bannedSet = new Set(banned.map(b => b.uid));
     // Фильтруем забаненных из рейтинга
     // В админке показываем ВСЕХ (включая забаненных с 🚫) — чтобы админ мог управлять
@@ -3424,16 +3459,18 @@ async function showAdminRatings() {
       html += '<div style="display:grid;grid-template-columns:24px 1fr 70px 50px 60px;gap:6px;font-size:11px;color:var(--text-dim);padding:4px;border-bottom:1px solid rgba(255,255,255,0.08);"><span>#</span><span>Имя</span><span>Рейтинг</span><span>Игр</span><span>Побед</span></div>';
       visibleRatings.forEach((r, i) => {
         const isBanned = bannedSet.has(r.uid);
+        // Актуальный ник из users (если есть), иначе из duel_ratings
+        const displayName = usersMap.get(r.uid) || r.name || r.uid?.slice(0,8) || '—';
         html += `<div style="display:grid;grid-template-columns:24px 1fr 70px 50px 60px 90px;gap:6px;padding:4px;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;${isBanned ? 'opacity:0.5;' : ''}">
           <span style="color:var(--text-dim)">${i+1}</span>
-          <span>${isBanned ? '🚫 ' : ''}${escapeHtml(r.name || r.uid?.slice(0,8) || '—')}</span>
+          <span>${isBanned ? '🚫 ' : ''}${escapeHtml(displayName)}</span>
           <span style="color:var(--accent);font-weight:bold">${r.rating ?? 1000}</span>
           <span>${r.games ?? 0}</span>
           <span style="color:var(--good)">${r.wins ?? 0}</span>
           <span style="display:flex;gap:2px;">
-            <button class="btn ghost admin-rating-history" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name||'')}" style="padding:2px 6px;font-size:0.7rem" title="История">📜</button>
-            <button class="btn ghost admin-rating-edit" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name||'')}" data-rating="${r.rating ?? 1000}" style="padding:2px 6px;font-size:0.7rem" title="Изменить рейтинг">✏️</button>
-            <button class="btn ghost admin-rating-ban" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(r.name||'')}" data-banned="${isBanned ? '1' : '0'}" style="padding:2px 6px;font-size:0.7rem;color:${isBanned ? 'var(--good)' : 'var(--warn)'}" title="${isBanned ? 'Разбанить' : 'Забанить'}">${isBanned ? '✓' : '🚫'}</button>
+            <button class="btn ghost admin-rating-history" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(displayName)}" style="padding:2px 6px;font-size:0.7rem" title="История">📜</button>
+            <button class="btn ghost admin-rating-edit" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(displayName)}" data-rating="${r.rating ?? 1000}" style="padding:2px 6px;font-size:0.7rem" title="Изменить рейтинг">✏️</button>
+            <button class="btn ghost admin-rating-ban" data-uid="${escapeHtml(r.uid)}" data-name="${escapeHtml(displayName)}" data-banned="${isBanned ? '1' : '0'}" style="padding:2px 6px;font-size:0.7rem;color:${isBanned ? 'var(--good)' : 'var(--warn)'}" title="${isBanned ? 'Разбанить' : 'Забанить'}">${isBanned ? '✓' : '🚫'}</button>
           </span>
         </div>`;
       });
