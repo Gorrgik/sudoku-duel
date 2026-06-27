@@ -193,7 +193,9 @@
   }
 
   function gisSignOut() {
+    // Универсальный выход — чистим ВСЕ наши сессии
     localStorage.removeItem(GIS_SESSION_KEY);
+    localStorage.removeItem('email_session');
     try {
       // Отзываем Google сессию
       if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
