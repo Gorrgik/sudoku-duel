@@ -50,6 +50,7 @@
           console.log('[SUDOKU] Custom session present, restore from localStorage');
           try { loadEmailSession(); } catch (_) {}
           try { window.gisLoadSession?.(); } catch (_) {}
+          try { updateAuthButton?.(); } catch (_) {}
           return;
         }
         if (session && session.user) {
