@@ -10,6 +10,7 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect x='1' y='1' width='34' height='34' rx='5' fill='%231e293b' stroke='%2338bdf8' stroke-width='2'/%3E%3Cg stroke='%2364748b' stroke-width='0.5' opacity='0.7'%3E%3Cline x1='9' y1='2' x2='9' y2='34'/%3E%3Cline x1='17' y1='2' x2='17' y2='34'/%3E%3Cline x1='25' y1='2' x2='25' y2='34'/%3E%3Cline x1='2' y1='9' x2='34' y2='9'/%3E%3Cline x1='2' y1='17' x2='34' y2='17'/%3E%3Cline x1='2' y1='25' x2='34' y2='25'/%3E%3C/g%3E%3Cg stroke='%23cbd5e1' stroke-width='1.5'%3E%3Cline x1='13' y1='1' x2='13' y2='35'/%3E%3Cline x1='23' y1='1' x2='23' y2='35'/%3E%3Cline x1='1' y1='13' x2='35' y2='13'/%3E%3Cline x1='1' y1='23' x2='35' y2='23'/%3E%3C/g%3E%3Cg font-family='monospace' font-weight='bold' text-anchor='middle' font-size='7'%3E%3Ctext x='7' y='10' fill='%23cbd5e1'%3E5%3C/text%3E%3Ctext x='15' y='10' fill='%2338bdf8'%3E9%3C/text%3E%3Ctext x='23' y='10' fill='%23cbd5e1'%3E3%3C/text%3E%3Ctext x='7' y='18' fill='%2364748b'%3E7%3C/text%3E%3Ctext x='15' y='18' fill='%23cbd5e1'%3E2%3C/text%3E%3Ctext x='23' y='18' fill='%2322c55e'%3E1%3C/text%3E%3Ctext x='7' y='26' fill='%23cbd5e1'%3E4%3C/text%3E%3Ctext x='15' y='26' fill='%2364748b'%3E8%3C/text%3E%3Ctext x='23' y='26' fill='%23f59e0b'%3E6%3C/text%3E%3C/g%3E%3C/svg%3E">
 <meta name="theme-color" content="#38bdf8">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
   // Google Identity Services Client ID
@@ -2106,6 +2107,57 @@ const RECORDS_KEY = 'sudoku_records_v1';
 // Firebase: ждём готовности
 let fbReady = false;
 window.addEventListener('firebase_ready', () => { fbReady = true; });
+
+// === Telegram Mini App ===
+// Если открыто внутри Telegram — разворачиваем на весь экран и пробуем автологин по initData
+// ВАЖНО: токен бота НЕ хранится в клиентском коде — он не нужен для WebApp SDK.
+// Токен нужен только на сервере (для проверки initData и отправки сообщений).
+let tgWebApp = null;
+let tgUser = null;
+try {
+  if (window.Telegram && window.Telegram.WebApp) {
+    tgWebApp = window.Telegram.WebApp;
+    tgWebApp.ready();
+    tgWebApp.expand();
+    tgWebApp.setHeaderColor?.('#1e293b');
+    tgWebApp.setBackgroundColor?.('#0f172a');
+    if (tgWebApp.initDataUnsafe?.user) {
+      tgUser = tgWebApp.initDataUnsafe.user;
+      console.log('[SUDOKU] Telegram Mini App user:', tgUser);
+    }
+    // Закрытие по свайпу вниз или back-кнопке
+    tgWebApp.BackButton?.show();
+    tgWebApp.BackButton?.onClick(() => {
+      // Возвращаемся на главный экран
+      hideModal();
+      if ($('gameScreen') && !$('gameScreen').classList.contains('hidden')) {
+        if (confirm('Выйти из текущей игры?')) showLevelScreen();
+      } else {
+        showLevelScreen();
+      }
+    });
+  }
+} catch (e) { console.warn('[SUDOKU] TG init error:', e); }
+
+// Автологин через Telegram — если юзер из Telegram, используем его данные
+async function tryTelegramAutoLogin() {
+  if (!tgUser || !tgUser.id) return false;
+  const email = `${tgUser.id}@telegram.duel`; // синтетический email
+  const name = (tgUser.first_name || '') + (tgUser.last_name ? ' ' + tgUser.last_name : '') || 'Telegram User';
+  try {
+    // Сохраняем telegram-сессию как email-сессию для единой логики
+    const sess = {
+      email,
+      verified_at: Date.now(),
+      tg: true,
+      tg_id: tgUser.id,
+      photo: tgUser.photo_url || null
+    };
+    localStorage.setItem('email_session', JSON.stringify(sess));
+    console.log('[SUDOKU] Telegram auto-login as:', email);
+    return true;
+  } catch (e) { return false; }
+}
 
 // Сохранить рекорд — сначала Firebase, потом локально
 async function saveRecord(rec) {
