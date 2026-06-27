@@ -3069,12 +3069,30 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
       const newName = (input?.value || '').trim();
       if (!newName) { alert('Имя не может быть пустым'); return; }
       if (newName.length > 20) { alert('Максимум 20 символов'); return; }
+      if (newName.length < 2) { alert('Минимум 2 символа'); return; }
       const btn = document.getElementById('authSaveNameBtn');
       btn.disabled = true; btn.textContent = '⏳...';
-      // Сохраняем в localStorage (приоритет над user_metadata)
-      window.FB.setMyName(newName);
       const myUid = window.FB.getMyUid();
       const myEmail = window.FB.getCurrentUser()?.email || '';
+
+      // Проверка уникальности ника (без учёта регистра)
+      try {
+        const checkR = await fetch(`${_SB_REST}/users?name=ilike.${encodeURIComponent(newName)}&select=uid&limit=1`, {
+          method: 'GET', headers: _SB_HDR, mode: 'cors'
+        });
+        if (checkR.ok) {
+          const existing = await checkR.json();
+          // Если нашли запись с таким ником и это НЕ я — отказ
+          if (existing.length > 0 && existing[0].uid !== myUid) {
+            btn.disabled = false; btn.textContent = 'Сохранить';
+            alert('❌ Ник «' + newName + '» уже занят другим игроком. Придумай другой.');
+            return;
+          }
+        }
+      } catch (e) { console.warn('name uniqueness check failed:', e); }
+
+      // Сохраняем в localStorage (приоритет над user_metadata)
+      window.FB.setMyName(newName);
       // Обновляем в Supabase user_metadata
       try { await supabase.auth.updateUser({ data: { name: newName } }); } catch(e) {}
       // Обновляем в users
@@ -3189,9 +3207,23 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
       const password = $('authPasswordInput')?.value;
       if (!email || !password) { alert('Введи email и пароль'); return; }
       if (password.length < 6) { alert('Пароль должен быть минимум 6 символов'); return; }
+      const defaultName = email.split('@')[0];
+      // Проверка: этот ник уже занят?
+      try {
+        const r = await fetch(`${_SB_REST}/users?name=ilike.${encodeURIComponent(defaultName)}&select=uid&limit=1`, {
+          method: 'GET', headers: _SB_HDR, mode: 'cors'
+        });
+        if (r.ok) {
+          const existing = await r.json();
+          if (existing.length > 0) {
+            alert('❌ Ник «' + defaultName + '» уже занят другим игроком. Зайди через Google (или войди под своим email если уже регистрировался).');
+            return;
+          }
+        }
+      } catch (e) {}
       $('authSignupBtn').disabled = true;
       $('authSignupBtn').textContent = '⏳ Регистрируем...';
-      const { error } = await window.FB.signUpWithEmail(email, password, email.split('@')[0]);
+      const { error } = await window.FB.signUpWithEmail(email, password, defaultName);
       $('authSignupBtn').disabled = false;
       $('authSignupBtn').textContent = 'Регистрация';
       if (error) alert('Ошибка регистрации: ' + error.message);
