@@ -3791,7 +3791,7 @@ async function showAdminRatings() {
   try {
     // Загружаем рейтинги + баны + актуальные ники из users — параллельно. Только залогиненные (UUID содержит дефисы)
     const [data, banned, users] = await Promise.all([
-      fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins&uid=like.*-*&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' })
+      fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins&uid=like.user_*&order=rating.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' })
         .then(r => r.ok ? r.json() : []).catch(() => []),
       fetch(`${_SB_REST}/banned_users?select=uid`, { method: 'GET', headers: _SB_HDR, mode: 'cors' })
         .then(r => r.ok ? r.json() : []).catch(() => []),
@@ -3881,7 +3881,7 @@ async function showAdminRatings() {
     cleanAnon.textContent = '🧹 Удалить анонимных';
     cleanAnon.addEventListener('click', async () => {
       if (!confirm('Удалить все записи анонимных пользователей (старые 16-символьные uid)?')) return;
-      const dr = await fetch(`${_SB_REST}/duel_ratings?uid=not.like.*-*`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
+      const dr = await fetch(`${_SB_REST}/duel_ratings?uid=not.like.user_*`, { method: 'DELETE', headers: _SB_HDR, mode: 'cors' });
       alert(dr.ok ? 'OK' : 'Ошибка: ' + dr.status);
       if (dr.ok) showAdminPanel();
     });
@@ -4239,7 +4239,7 @@ async function showAdminMonitor() {
       const users = await usersR.json();
 
       // 3. Анонимные пользователи (uid БЕЗ дефисов — старая 16-символьная запись)
-      const anonR = await fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins,last_seen&uid=not.like.*-*&order=last_seen.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
+      const anonR = await fetch(`${_SB_REST}/duel_ratings?select=uid,name,rating,games,wins,last_seen&uid=not.like.user_*&order=last_seen.desc&limit=200`, { method: 'GET', headers: _SB_HDR, mode: 'cors' });
       const anonUsers = anonR.ok ? await anonR.json() : [];
 
       // 4. Matchmaking
