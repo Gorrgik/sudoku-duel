@@ -4750,13 +4750,15 @@ function showSettingsModal() {
         </div>
         <button class="btn ${soundEnabled ? 'primary' : 'ghost'}" id="setSoundToggle" style="padding:6px 14px;font-size:0.85rem;">${soundEnabled ? '🔊 Вкл' : '🔇 Выкл'}</button>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-soft);padding:14px 16px;border-radius:10px;${vibSupported ? '' : 'opacity:0.4;'}">
+      ${vibSupported ? `
+      <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg-soft);padding:14px 16px;border-radius:10px;">
         <div>
           <div style="font-weight:600;">📳 Вибрация</div>
-          <div style="color:var(--text-dim);font-size:0.82rem;">${vibSupported ? (vibrationEnabled ? 'Включена' : 'Выключена') : 'Не поддерживается'}</div>
+          <div style="color:var(--text-dim);font-size:0.82rem;">${vibrationEnabled ? 'Включена' : 'Выключена'}</div>
         </div>
-        <button class="btn ${vibrationEnabled ? 'primary' : 'ghost'}" id="setVibToggle" style="padding:6px 14px;font-size:0.85rem;" ${vibSupported ? '' : 'disabled'}>${vibrationEnabled ? '📳 Вкл' : '📴 Выкл'}</button>
+        <button class="btn ${vibrationEnabled ? 'primary' : 'ghost'}" id="setVibToggle" style="padding:6px 14px;font-size:0.85rem;">${vibrationEnabled ? '📳 Вкл' : '📴 Выкл'}</button>
       </div>
+      ` : ''}
       <button class="btn ghost" id="setFeedbackBtn" style="width:100%;padding:14px;text-align:left;font-size:1rem;">📨 Сообщить о баге / идею</button>
     </div>
     <button class="btn ghost" id="settingsCloseBtn" style="width:100%;margin-top:16px;">Закрыть</button>
@@ -5210,7 +5212,7 @@ document.addEventListener('keydown', e => {
 
 // Закрытие модалки по клику на фон
 $('modal').addEventListener('click', e => {
-  if (e.target === $('modal')) hideModal();
+  if (e.target === $('modal') && !$('modal').classList.contains('no-overlay-close')) hideModal();
 });
 
 // Сохраняем имя при вводе для следующих раз
@@ -5798,33 +5800,55 @@ async function showDuelMenu() {
   forceHideModal();
   const myRating = await window.FB.getMyRating();
   duelMyRating = myRating?.rating || 1000;
-  // Имя: из Google аккаунта или из localStorage
-  const myName = window.FB.getMyName() || localStorage.getItem('sudoku_duel_name') || '';
+
+  // Загружаем количество играющих сейчас (last_seen за последние 2 минуты)
+  let playingNow = 0;
+  let avgWait = '--';
+  try {
+    const since = Date.now() - 2 * 60 * 1000;
+    const sbRest = 'https://iirydyaesqidmvpsmzfn.supabase.co/rest/v1';
+    const sbHdr = { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g' };
+    const r = await fetch(`${sbRest}/duel_ratings?select=uid&last_seen=gt.${since}&uid=like.user_*`, { headers: sbHdr });
+    if (r.ok) playingNow = (await r.json()).length;
+    // Среднее время поиска из localStorage
+    const stats = JSON.parse(localStorage.getItem('sudoku_search_stats') || '{}');
+    if (stats.count > 0) avgWait = Math.round(stats.total / stats.count) + ' сек';
+  } catch (e) {}
 
   const modal = $('modalContent');
   modal.innerHTML = `
     <div class="duel-modal-step">
       <h2>⚔️ Дуэль</h2>
       <div class="modal-sub">Сразись с другим игроком на одной доске!<br>3 жизни · без подсказок · рейтинг на кону</div>
-      <div style="text-align:center;margin-bottom:16px;">
-        <input type="text" class="duel-code-input" id="duelNameInput"
-          placeholder="Твоё имя" maxlength="20"
-          value="${escapeHtml(myName)}"
-          style="letter-spacing:0;text-transform:none;font-family:sans-serif;text-align:left;">
-        <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:16px;">Рейтинг: ⭐ ${duelMyRating}</div>
+      <div style="display:flex;justify-content:center;gap:18px;margin-bottom:16px;padding:12px;background:var(--bg-soft);border-radius:10px;">
+        <div style="text-align:center;">
+          <div style="font-size:0.78rem;color:var(--text-dim);">Играют сейчас</div>
+          <div style="font-size:1.4rem;font-weight:700;color:var(--good);" id="duelPlayingNow">${playingNow}</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:0.78rem;color:var(--text-dim);">Твой рейтинг</div>
+          <div style="font-size:1.4rem;font-weight:700;color:var(--accent);">⭐ ${duelMyRating}</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:0.78rem;color:var(--text-dim);">Средний поиск</div>
+          <div style="font-size:1.4rem;font-weight:700;color:var(--warn);" id="duelAvgWait">${avgWait}</div>
+        </div>
       </div>
+      <button class="btn duel-btn" id="duelAutoBtn" style="width:100%;margin-bottom:8px;font-size:1.1rem;padding:14px;">🔍 Найти случайного соперника</button>
       <button class="btn primary" id="duelCreateBtn" style="width:100%;margin-bottom:8px;">🏠 Создать комнату</button>
       <div class="duel-or">или введи код соперника</div>
       <input type="text" class="duel-code-input" id="duelJoinInput" placeholder="Код комнаты" maxlength="8">
       <button class="btn ghost" id="duelJoinBtn" style="width:100%;margin-bottom:14px;">🚪 Присоединиться</button>
-      <div class="duel-or">или</div>
-      <button class="btn duel-btn" id="duelAutoBtn" style="width:100%">🔍 Найти случайного соперника</button>
       <div style="margin-top:14px;"><button class="btn ghost" id="duelMenuCloseBtn">← Назад</button></div>
     </div>
   `;
+  // Запрещаем закрытие по клику на overlay (юзер остаётся в меню)
+  $('modal').classList.add('no-overlay-close');
   showModal();
 
   $('duelMenuCloseBtn').addEventListener('click', () => {
+    $('modal').classList.remove('no-overlay-close');
+    $('duelMenuCloseBtn').addEventListener('click', () => {
     // Полная очистка: модалка + дуэль-state + matchmaking + обычная state
     window.FB?.leaveQueue?.();
     duelCode = null; duelBoard = null; duelPuzzle = null; duelSolution = null;
@@ -5875,6 +5899,7 @@ async function showDuelMenu() {
     btn.disabled = true;
     const origText = btn.textContent;
     btn.textContent = '⏳ Ищем соперника...';
+    window._duelSearchStart = Date.now();
     // Проверка бана ДО показа модалки поиска
     if (await window.FB?.isBanned?.()) {
       btn.disabled = false;
@@ -5974,6 +5999,20 @@ function showMatchmakingModal(name, onCleanup) {
   // Единственный вызов joinQueue — здесь, один раз
   window.FB.joinQueue(name, duelMyRating, (roomCode, roomData) => {
     console.log('[SUDOKU] auto-match: нашли соперника, комната', roomCode);
+    // Записываем время поиска для статистики
+    if (typeof window._duelSearchStart === 'number') {
+      const dur = Math.round((Date.now() - window._duelSearchStart) / 1000);
+      try {
+        const stats = JSON.parse(localStorage.getItem('sudoku_search_stats') || '{"total":0,"count":0}');
+        stats.total += dur;
+        stats.count += 1;
+        // Храним последние 50 результатов для скользящего среднего
+        stats.last = (stats.last || []).concat([dur]).slice(-50);
+        if (stats.last.length > 5) stats.total = stats.last.reduce((a,b) => a+b, 0);
+        localStorage.setItem('sudoku_search_stats', JSON.stringify(stats));
+      } catch (e) {}
+      window._duelSearchStart = null;
+    }
     forceHideModal();
     initDuelGame(roomCode, roomData);
     if (onCleanup) onCleanup();
