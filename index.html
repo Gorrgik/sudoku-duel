@@ -5968,8 +5968,7 @@ function showWaitingModal(name, code) {
     if (unsubWait) { unsubWait(); unsubWait = null; }
     if (bc) bc.close();
     window.FB.leaveQueue();
-    hideModal();
-    showLevelScreen();
+    showDuelMenu();
   });
 }
 
@@ -5990,7 +5989,7 @@ function showMatchmakingModal(name, onCleanup) {
   showModal();
   $('duelCancelMatchBtn').addEventListener('click', () => {
     window.FB.leaveQueue();
-    hideModal();
+    // showDuelMenu() сам вызывает forceHideModal() внутри, дополнительный hideModal() даёт мигание
     showDuelMenu();
     if (onCleanup) onCleanup();
   });
