@@ -5801,18 +5801,21 @@ async function showDuelMenu() {
   const myRating = await window.FB.getMyRating();
   duelMyRating = myRating?.rating || 1000;
 
-  // Загружаем количество играющих сейчас (last_seen за последние 2 минуты)
+  // Загружаем количество играющих сейчас (status=playing в duel_rooms)
   let playingNow = 0;
-  let avgWait = '--';
   try {
-    const since = Date.now() - 2 * 60 * 1000;
     const sbRest = 'https://iirydyaesqidmvpsmzfn.supabase.co/rest/v1';
     const sbHdr = { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpcnlkeWFlc3FpZG12cHNtemZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwOTQyMjQsImV4cCI6MjA5NzY3MDIyNH0.is8NWrLEFdps2a4Cwnb6i9LhbA3TkfE87dV_1S21v7g' };
-    const r = await fetch(`${sbRest}/duel_ratings?select=uid&last_seen=gt.${since}&uid=like.user_*`, { headers: sbHdr });
-    if (r.ok) playingNow = (await r.json()).length;
-    // Среднее время поиска из localStorage
-    const stats = JSON.parse(localStorage.getItem('sudoku_search_stats') || '{}');
-    if (stats.count > 0) avgWait = Math.round(stats.total / stats.count) + ' сек';
+    const r = await fetch(`${sbRest}/duel_rooms?select=player1_uid,player2_uid&status=eq.playing`, { headers: sbHdr });
+    if (r.ok) {
+      const rooms = await r.json();
+      const uids = new Set();
+      for (const rm of rooms) {
+        if (rm.player1_uid) uids.add(rm.player1_uid);
+        if (rm.player2_uid) uids.add(rm.player2_uid);
+      }
+      playingNow = uids.size;
+    }
   } catch (e) {}
 
   const modal = $('modalContent');
@@ -5828,10 +5831,6 @@ async function showDuelMenu() {
         <div style="text-align:center;">
           <div style="font-size:0.78rem;color:var(--text-dim);">Твой рейтинг</div>
           <div style="font-size:1.4rem;font-weight:700;color:var(--accent);">⭐ ${duelMyRating}</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:0.78rem;color:var(--text-dim);">Средний поиск</div>
-          <div style="font-size:1.4rem;font-weight:700;color:var(--warn);" id="duelAvgWait">${avgWait}</div>
         </div>
       </div>
       <button class="btn duel-btn" id="duelAutoBtn" style="width:100%;margin-bottom:8px;font-size:1.1rem;padding:14px;">🔍 Найти случайного соперника</button>
@@ -5974,6 +5973,15 @@ function showWaitingModal(name, code) {
 
 function showMatchmakingModal(name, onCleanup) {
   forceHideModal();
+  // Среднее время поиска (из последних 50 результатов)
+  let avgWaitText = '-- сек';
+  try {
+    const stats = JSON.parse(localStorage.getItem('sudoku_search_stats') || '{}');
+    if (stats.last && stats.last.length > 0) {
+      const avg = Math.round(stats.last.reduce((a,b) => a+b, 0) / stats.last.length);
+      avgWaitText = avg + ' сек';
+    }
+  } catch (e) {}
   const modal = $('modalContent');
   modal.innerHTML = `
     <div class="duel-modal-step">
@@ -5983,13 +5991,15 @@ function showMatchmakingModal(name, onCleanup) {
         <div class="dots"><span></span><span></span><span></span></div>
         <div style="font-size:0.82rem;color:var(--text-dim);" id="matchStatus">Ищем в очереди...</div>
       </div>
+      <div style="margin-top:10px;font-size:0.78rem;color:var(--text-dim);">
+        ⏱ Среднее время поиска: <span id="duelAvgWaitSearch" style="font-weight:600;color:var(--text);">${avgWaitText}</span>
+      </div>
       <button class="btn ghost" id="duelCancelMatchBtn">Отмена</button>
     </div>
   `;
   showModal();
   $('duelCancelMatchBtn').addEventListener('click', () => {
     window.FB.leaveQueue();
-    // showDuelMenu() сам вызывает forceHideModal() внутри, дополнительный hideModal() даёт мигание
     showDuelMenu();
     if (onCleanup) onCleanup();
   });
