@@ -3302,6 +3302,7 @@ document.getElementById('authSaveNameBtn')?.addEventListener('click', async () =
 // === Email magic-link вход (через Edge Functions) ===
 const EMAIL_SESSION_KEY = 'email_session';
 const FN_URL = 'https://iirydyaesqidmvpsmzfn.supabase.co/functions/v1';
+const SEND_EMAIL_FN = 'tmp-send-email-code';
 
 async function showEmailLoginStep1() {
   const modal = $('modalContent');
@@ -3329,7 +3330,7 @@ async function showEmailLoginStep1() {
     btn.disabled = true; btn.textContent = '⏳ Отправляю...';
     status.innerHTML = '<span style="color:var(--text-dim)">⏳ Отправляем код...</span>';
     try {
-      const r = await fetch(`${FN_URL}/send-email-code`, {
+      const r = await fetch(`${FN_URL}/${SEND_EMAIL_FN}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });
