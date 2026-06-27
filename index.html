@@ -907,6 +907,98 @@
         const rows = await sbGet('duel_ratings', 'order=rating.desc&limit=50');
         return rows || [];
       } catch { return null; }
+    },
+
+    // ===== Daily Challenge =====
+    async getDailyChallenge() {
+      if (!sbOk) return null;
+      const today = new Date();
+      const yyyymmdd = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      try {
+        const existing = await sbGet('daily_challenges', `date=eq.${dateStr}&limit=1`);
+        if (existing && existing[0]) return existing[0];
+        // Генерируем через существующую функцию (должна быть в глобале)
+        const gen = (typeof generateSeededPuzzle === 'function')
+          ? generateSeededPuzzle(String(yyyymmdd), 38)
+          : (typeof generatePuzzle === 'function' ? generatePuzzle(38) : null);
+        if (!gen) return null;
+        const row = { date: dateStr, seed: yyyymmdd, puzzle: gen.puzzle, solution: gen.solution };
+        try { await sbPost('daily_challenges', row); } catch (e) { /* race ok */ }
+        return row;
+      } catch (e) { return null; }
+    },
+
+    async submitDailyResult(uid, name, timeSeconds, errors) {
+      if (!sbOk || !uid) return null;
+      const today = new Date();
+      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      try {
+        const row = { date: dateStr, uid, name: (name || 'Игрок').slice(0, 20), time_seconds: timeSeconds, errors: errors || 0 };
+        await sbPost('daily_results', row);
+        return row;
+      } catch (e) { return null; }
+    },
+
+    async getDailyLeaderboard(limit = 50) {
+      if (!sbOk) return [];
+      const today = new Date();
+      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      try {
+        const rows = await sbGet('daily_results', `date=eq.${dateStr}&order=time_seconds.asc&limit=${limit}`);
+        return rows || [];
+      } catch (e) { return []; }
+    },
+
+    async getMyDailyResult() {
+      if (!sbOk || !myUid) return null;
+      const today = new Date();
+      const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      try {
+        const rows = await sbGet('daily_results', `date=eq.${dateStr}&uid=eq.${myUid}&limit=1`);
+        return rows && rows[0] ? rows[0] : null;
+      } catch (e) { return null; }
+    },
+
+    // ===== Achievements =====
+    ACHIEVEMENTS: {
+      first_win:       { name: 'Первая победа',          icon: '🏆', desc: 'Одержи победу в своей первой дуэли' },
+      first_loss:      { name: 'Закалка',                icon: '🛡️', desc: 'Проиграй свою первую дуэль' },
+      streak_3:        { name: 'Серия побед',            icon: '🔥', desc: 'Победи 3 раза подряд' },
+      streak_5:        { name: 'Неудержимый',            icon: '⚡', desc: 'Победи 5 раз подряд' },
+      streak_10:       { name: 'Доминатор',              icon: '👑', desc: 'Победи 10 раз подряд' },
+      rating_1100:     { name: 'Середнячок',             icon: '⭐', desc: 'Достигни рейтинга 1100' },
+      rating_1300:     { name: 'Сильный игрок',          icon: '🌟', desc: 'Достигни рейтинга 1300' },
+      rating_1500:     { name: 'Эксперт',                icon: '💎', desc: 'Достигни рейтинга 1500' },
+      rating_1800:     { name: 'Мастер судоку',          icon: '🏅', desc: 'Достигни рейтинга 1800' },
+      speed_demon:     { name: 'Спринтер',               icon: '🚀', desc: 'Победи в дуэли менее чем за 60 секунд' },
+      perfectionist:   { name: 'Перфекционист',          icon: '✨', desc: 'Победи без единой ошибки' },
+      comeback:        { name: 'Камбэк',                 icon: '💪', desc: 'Победи после поражения' },
+      duels_10:        { name: '10 дуэлей',              icon: '🎮', desc: 'Сыграй 10 дуэлей' },
+      duels_50:        { name: '50 дуэлей',              icon: '🎲', desc: 'Сыграй 50 дуэлей' },
+      duels_100:       { name: '100 дуэлей',             icon: '🎯', desc: 'Сыграй 100 дуэлей' },
+      first_daily:     { name: 'Ежедневный игрок',       icon: '📅', desc: 'Заверши первый Daily Challenge' },
+      daily_streak_3:  { name: '3 дня подряд',           icon: '📆', desc: 'Сыграй Daily Challenge 3 дня подряд' },
+      daily_streak_7:  { name: 'Неделя силы',            icon: '🌅', desc: 'Сыграй Daily Challenge 7 дней подряд' },
+      single_easy:     { name: 'Лёгкий мастер',          icon: '🌱', desc: 'Побей рекорд на лёгком уровне' },
+      single_medium:   { name: 'Средний мастер',         icon: '🌿', desc: 'Побей рекорд на среднем уровне' },
+      single_hard:     { name: 'Сложный мастер',         icon: '🌳', desc: 'Побей рекорд на сложном уровне' }
+    },
+
+    async getMyAchievements() {
+      if (!sbOk || !myUid) return [];
+      try {
+        const rows = await sbGet('user_achievements', `uid=eq.${myUid}&order=unlocked_at.desc`);
+        return rows || [];
+      } catch (e) { return []; }
+    },
+
+    async unlockAchievement(code) {
+      if (!sbOk || !myUid || !code) return false;
+      try {
+        await sbPost('user_achievements', { uid: myUid, code });
+        return true;
+      } catch (e) { return false; }
     }
   };
 })();
@@ -1657,6 +1749,8 @@
   </div>
   <div class="extra-actions">
     <button class="btn primary" id="resumeBtn" style="display:none">▶ Продолжить игру</button>
+    <button class="btn ghost" id="dailyChallengeBtn">📅 Daily Challenge</button>
+    <button class="btn ghost" id="showAchievementsBtn">🏆 Достижения</button>
     <button class="btn ghost" id="showRecordsBtn">🏆 Таблица рекордов</button>
     <button class="btn ghost" id="showDuelRatingsBtn">📊 Рейтинг дуэлей</button>
   </div>
@@ -3048,6 +3142,13 @@ function showWinModal({ level, elapsed, errorCount, moves }) {
       moves: moves,
       date: new Date().toISOString()
     });
+    // Проверка ачивок за рекорд
+    checkAchievements({ type: 'record', level });
+    // Если это был Daily Challenge — отправляем результат
+    if (window._dailyInProgress) {
+      window._dailyInProgress = false;
+      submitDailyResult();
+    }
     showRecordsModal();
   });
   $('winNewBtn').addEventListener('click', () => {
@@ -5122,6 +5223,8 @@ setTimeout(updateAuthButton, 1500);
 setTimeout(updateAuthButton, 3000);
 
 $('resumeBtn').addEventListener('click', resumeGame);
+$('dailyChallengeBtn').addEventListener('click', showDailyChallengeModal);
+$('showAchievementsBtn').addEventListener('click', showAchievementsModal);
 $('showRecordsBtn').addEventListener('click', showRecordsModal);
 $('showDuelBtn').addEventListener('click', () => {
   if (!window.FB.isReady()) {
@@ -5674,6 +5777,27 @@ async function endDuelGame(result) {
   if (newBtn) newBtn.addEventListener('click', () => { hideModal(); showDuelMenu(); });
   if (homeBtn) homeBtn.addEventListener('click', () => { hideModal(); showLevelScreen(); });
 
+  // Проверка ачивок после дуэли (асинхронно, не блокируем UI)
+  const duelTime = Math.floor((Date.now() - (window._duelStartTime || Date.now())) / 1000);
+  const duelErrors = Number(duelMyLives === 3 ? 0 : (3 - duelMyLives));
+  const totalDuels = Number((parseInt(localStorage.getItem('sudoku_total_duels') || '0')) + 1);
+  localStorage.setItem('sudoku_total_duels', String(totalDuels));
+  const lastResult = localStorage.getItem('sudoku_last_duel_result');
+  const lastWasLoss = (lastResult === 'lose' || lastResult === 'quit_lose');
+  localStorage.setItem('sudoku_last_duel_result', isWin ? 'win' : 'lose');
+  // streak
+  const streak = Number(localStorage.getItem('sudoku_win_streak') || '0');
+  const newStreak = isWin ? streak + 1 : 0;
+  localStorage.setItem('sudoku_win_streak', String(newStreak));
+  checkAchievements({
+    type: isWin ? 'win' : 'lose',
+    time: duelTime,
+    errors: duelErrors,
+    lastWasLoss,
+    streak: newStreak,
+    totalDuels
+  });
+
   duelCode = null;
 }
 
@@ -5790,6 +5914,7 @@ async function initDuelGame(code, initialRoomData) {
   duelSelected = null;
   duelPuzzle = null; duelSolution = null; duelBoard = null;
   duelPlayer = null;
+  window._duelStartTime = Date.now();
 
   $('levelScreen').classList.add('hidden');
   $('gameScreen').classList.add('hidden');
@@ -6143,6 +6268,281 @@ function showMatchmakingModal(name, onCleanup) {
   });
 }
 
+// === ACHIEVEMENTS ===
+// Проверка и разблокировка ачивок после события
+async function checkAchievements(ctx) {
+  if (!window.FB || !window.FB.ACHIEVEMENTS) return [];
+  const myUid = window.FB.getMyUid();
+  if (!myUid) return [];
+
+  const already = await window.FB.getMyAchievements();
+  const have = new Set(already.map(a => a.code));
+  const unlocked = [];
+
+  const tryUnlock = async (code) => {
+    if (have.has(code)) return;
+    const ok = await window.FB.unlockAchievement(code);
+    if (ok) { unlocked.push(code); have.add(code); }
+  };
+
+  // Рейтинг
+  const rating = Number(window.FB.getMyRatingSync?.() || 1000);
+  if (rating >= 1100) await tryUnlock('rating_1100');
+  if (rating >= 1300) await tryUnlock('rating_1300');
+  if (rating >= 1500) await tryUnlock('rating_1500');
+  if (rating >= 1800) await tryUnlock('rating_1800');
+
+  // События дуэли
+  if (ctx.type === 'win') {
+    await tryUnlock('first_win');
+    if (ctx.time && ctx.time < 60) await tryUnlock('speed_demon');
+    if (ctx.errors === 0) await tryUnlock('perfectionist');
+    if (ctx.lastWasLoss) await tryUnlock('comeback');
+    if (ctx.streak >= 3) await tryUnlock('streak_3');
+    if (ctx.streak >= 5) await tryUnlock('streak_5');
+    if (ctx.streak >= 10) await tryUnlock('streak_10');
+  }
+  if (ctx.type === 'lose') {
+    await tryUnlock('first_loss');
+  }
+  if (ctx.totalDuels >= 10) await tryUnlock('duels_10');
+  if (ctx.totalDuels >= 50) await tryUnlock('duels_50');
+  if (ctx.totalDuels >= 100) await tryUnlock('duels_100');
+
+  // Single records
+  if (ctx.type === 'record') {
+    if (ctx.level === 'easy') await tryUnlock('single_easy');
+    if (ctx.level === 'medium') await tryUnlock('single_medium');
+    if (ctx.level === 'hard') await tryUnlock('single_hard');
+  }
+
+  // Daily Challenge
+  if (ctx.type === 'daily_complete') {
+    await tryUnlock('first_daily');
+    const streak = getDailyStreak();
+    if (streak >= 3) await tryUnlock('daily_streak_3');
+    if (streak >= 7) await tryUnlock('daily_streak_7');
+  }
+
+  if (unlocked.length > 0) showAchievementToast(unlocked);
+  return unlocked;
+}
+
+function getDailyStreak() {
+  try {
+    const dates = JSON.parse(localStorage.getItem('sudoku_daily_dates') || '[]');
+    if (!dates.length) return 0;
+    let streak = 0;
+    const d = new Date();
+    for (let i = 0; i < 30; i++) {
+      const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (dates.includes(ds)) {
+        streak++;
+        d.setDate(d.getDate() - 1);
+      } else if (i === 0) {
+        d.setDate(d.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+    return streak;
+  } catch { return 0; }
+}
+
+function recordDailyCompletion() {
+  try {
+    const dates = JSON.parse(localStorage.getItem('sudoku_daily_dates') || '[]');
+    const today = new Date();
+    const ds = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    if (!dates.includes(ds)) {
+      dates.push(ds);
+      // Храним последние 30 дней
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
+      const filtered = dates.filter(d => new Date(d) >= cutoff);
+      localStorage.setItem('sudoku_daily_dates', JSON.stringify(filtered));
+    }
+  } catch (e) {}
+}
+
+function showAchievementToast(codes) {
+  const defs = window.FB.ACHIEVEMENTS;
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed;top:80px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:10px;pointer-events:none;';
+  codes.forEach((code, i) => {
+    const def = defs[code];
+    if (!def) return;
+    const toast = document.createElement('div');
+    toast.style.cssText = `background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#0f172a;padding:12px 18px;border-radius:12px;font-weight:700;box-shadow:0 8px 24px rgba(245,158,11,0.4);display:flex;align-items:center;gap:10px;animation:achSlideIn 0.4s ease ${i*0.15}s both;max-width:320px;`;
+    toast.innerHTML = `<span style="font-size:1.6rem;">${def.icon}</span><div><div style="font-size:0.7rem;opacity:0.7;text-transform:uppercase;letter-spacing:0.5px;">Достижение</div><div style="font-size:0.95rem;">${def.name}</div></div>`;
+    container.appendChild(toast);
+    setTimeout(() => { toast.style.transition = 'opacity 0.5s, transform 0.5s'; toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; }, 4000 + i * 150);
+    setTimeout(() => toast.remove(), 5000 + i * 150);
+  });
+  document.body.appendChild(container);
+  setTimeout(() => container.remove(), 6000);
+}
+
+// CSS-анимация для тоста
+const achStyle = document.createElement('style');
+achStyle.textContent = '@keyframes achSlideIn { from { opacity:0; transform:translateX(120%); } to { opacity:1; transform:translateX(0); } }';
+document.head.appendChild(achStyle);
+
+async function showAchievementsModal() {
+  const myUid = window.FB.getMyUid();
+  const all = window.FB.ACHIEVEMENTS;
+  const unlocked = myUid ? await window.FB.getMyAchievements() : [];
+  const have = new Set(unlocked.map(a => a.code));
+
+  const list = Object.entries(all).map(([code, def]) => {
+    const got = have.has(code);
+    return `<div class="ach-row" style="display:flex;align-items:center;gap:12px;padding:10px;border-radius:10px;background:${got ? 'var(--bg-soft)' : 'transparent'};opacity:${got ? '1' : '0.35'};">
+      <div style="font-size:1.8rem;filter:${got ? '' : 'grayscale(1)'};">${def.icon}</div>
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:0.95rem;">${def.name}</div>
+        <div style="font-size:0.75rem;color:var(--text-dim);">${def.desc}</div>
+      </div>
+      <div style="font-size:0.75rem;color:${got ? 'var(--good)' : 'var(--text-dim)'};">${got ? '✓' : '🔒'}</div>
+    </div>`;
+  }).join('');
+
+  const modal = $('modalContent');
+  modal.innerHTML = `
+    <h2>🏆 Достижения</h2>
+    <div class="modal-sub">${unlocked.length} из ${Object.keys(all).length} разблокировано</div>
+    <div style="max-height:55vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin:14px 0;">
+      ${list}
+    </div>
+    <div class="modal-actions">
+      <button class="btn primary" id="achCloseBtn">Закрыть</button>
+    </div>
+  `;
+  showModal();
+  $('achCloseBtn').addEventListener('click', hideModal);
+}
+
+// === DAILY CHALLENGE ===
+let dailyState = null;
+let dailyTimer = null;
+let dailyStartTime = 0;
+let dailyErrors = 0;
+let dailyCompleted = false;
+let dailyErrorsGlobal = 0;
+
+async function showDailyChallengeModal() {
+  const myUid = window.FB.getMyUid();
+  if (!myUid) { alert('Войдите, чтобы участвовать в Daily Challenge'); return; }
+  if (!window.FB.isReady()) { alert('Загрузка...'); return; }
+
+  forceHideModal();
+  const modal = $('modalContent');
+  modal.innerHTML = `
+    <div class="duel-modal-step">
+      <h2>📅 Daily Challenge</h2>
+      <div class="modal-sub">Одна доска для всех игроков мира.<br>Покажи лучшее время!</div>
+      <div id="dailyInfo" style="margin:14px 0;font-size:0.85rem;color:var(--text-dim);">
+        <div>Участников сегодня: <span id="dailyCount">...</span></div>
+        <div>Твоё время: <span id="dailyMyTime">—</span></div>
+      </div>
+      <button class="btn primary" id="dailyStartBtn" style="width:100%;margin-bottom:8px;">▶ Начать</button>
+      <button class="btn ghost" id="dailyLbBtn" style="width:100%;margin-bottom:8px;">🏆 Лидерборд</button>
+      <div style="margin-top:14px;"><button class="btn ghost" id="dailyCloseBtn">← Назад</button></div>
+    </div>
+  `;
+  showModal();
+
+  // Загружаем инфу
+  const [leaderboard, myResult] = await Promise.all([
+    window.FB.getDailyLeaderboard(100),
+    window.FB.getMyDailyResult()
+  ]);
+  $('dailyCount').textContent = leaderboard.length;
+  $('dailyMyTime').textContent = myResult ? formatTime(myResult.time_seconds) : '—';
+
+  $('dailyStartBtn').addEventListener('click', async () => {
+    const challenge = await window.FB.getDailyChallenge();
+    if (!challenge) { alert('Не удалось загрузить задание'); return; }
+    startDailyGame(challenge);
+  });
+  $('dailyLbBtn').addEventListener('click', showDailyLeaderboardModal);
+  $('dailyCloseBtn').addEventListener('click', hideModal);
+}
+
+function startDailyGame(challenge) {
+  dailyCompleted = false;
+  dailyErrors = 0;
+  dailyErrorsGlobal = 0;
+  dailyStartTime = Date.now();
+  window._dailyInProgress = true;
+  forceHideModal();
+  $('levelScreen').classList.add('hidden');
+  $('gameScreen').classList.remove('hidden');
+  // Используем существующую логику одиночной игры с заданной доской
+  puzzle = parseBoard(challenge.puzzle);
+  solution = parseBoard(challenge.solution);
+  board = puzzle.map(r => r.slice());
+  state = {
+    puzzle, solution, board,
+    started: true,
+    pencilMode: false,
+    selected: null,
+    errors: 0,
+    maxErrors: 999,
+    hints: 0,
+    seconds: 0,
+    level: 'easy'
+  };
+  selectedCell = null;
+  selectedDigit = null;
+  digitHighlightN = null;
+  startTimer();
+  renderBoard();
+  renderNumPad();
+  // Меняем заголовок
+  const title = document.querySelector('#gameScreen .topbar h1');
+  if (title) title.innerHTML = '📅 Daily Challenge';
+}
+
+async function submitDailyResult() {
+  const myUid = window.FB.getMyUid();
+  if (!myUid || dailyCompleted) return;
+  const time = Math.floor((Date.now() - dailyStartTime) / 1000);
+  const name = window.FB.getMyName?.() || 'Игрок';
+  await window.FB.submitDailyResult(myUid, name, time, dailyErrors);
+  recordDailyCompletion();
+  dailyCompleted = true;
+  await checkAchievements({ type: 'daily_complete' });
+}
+
+async function showDailyLeaderboardModal() {
+  const rows = await window.FB.getDailyLeaderboard(100);
+  const myUid = window.FB.getMyUid();
+  const html = !rows.length
+    ? `<div class="empty-state">Пока никто не прошёл.<br>Будь первым!</div>`
+    : rows.map((r, i) => {
+        const isMe = r.uid === myUid;
+        const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+        return `<div class="record-row ${rankClass} ${isMe ? 'me-row' : ''}">
+          <div class="rank">#${i+1}</div>
+          <div class="name">${escapeHtml(r.name || 'Игрок')}${isMe ? ' (ты)' : ''}</div>
+          <div class="time">${formatTime(r.time_seconds)}</div>
+          <div class="lvl-tag">${r.errors || 0} ❌</div>
+        </div>`;
+      }).join('');
+
+  const modal = $('modalContent');
+  modal.innerHTML = `
+    <h2>📅 Лидерборд сегодня</h2>
+    <div class="modal-sub">${rows.length} участников</div>
+    <div class="records-list">${html}</div>
+    <div class="modal-actions">
+      <button class="btn primary" id="dailyLbCloseBtn">Закрыть</button>
+    </div>
+  `;
+  showModal();
+  $('dailyLbCloseBtn').addEventListener('click', hideModal);
+}
+
 // === РЕЙТИНГ ДУЭЛЕЙ ===
 async function showDuelRatingsModal() {
   const modal = $('modalContent');
@@ -6215,7 +6615,7 @@ document.addEventListener('keydown', e => {
 <main id="seo-content" style="display:none;" aria-hidden="true">
 <h1>Sudoku Duel — играть в судоку онлайн с другом бесплатно</h1>
 <h2>Что такое Sudoku Duel?</h2>
-<p>Sudoku Duel — это бесплатная онлайн-игра в судоку на двоих в реальном времени. Два игрока получают одинаковую доску 9×9 и наперегонки заполняют её цифрами от 1 до 9. Каждый неправильный ход отнимает одну жизнь — у тебя их всего три. Кто первый заполнит всю доску (или у кого останутся жизни) — побеждает.</p>
+<p>Sudoku Duel — это бесплатная онлайн-игра в судоку на двоих в реальном времени. Два игрока получают одинаковую доску 9×9 и наперегонки заполняют её цифрами от 1 до 9. Каждый неправильный ход отнимает одну жизнь — у тебя их всего три. Кто первый заполнит всю доску (или у кого останутся жизни) — побеждает. Полные правила доступны на странице <a href="rules.html">Правила судоку</a>, а полезные советы — в разделе <a href="strategy.html">стратегии решения</a>.</p>
 
 <h2>Как играть в судоку дуэль?</h2>
 <p>Правила просты: каждая строка, столбец и блок 3×3 должны содержать цифры от 1 до 9 без повторений. В дуэли оба соперника решают одну и ту же головоломку, но независимо друг от друга. Кто быстрее и точнее — тот побеждает и получает очки ELO-рейтинга.</p>

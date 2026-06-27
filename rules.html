@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Правила судоку — как играть | Sudoku Duel</title>
+<meta name="description" content="Полные правила классического судоку для начинающих и опытных игроков. Узнайте как решать головоломки 9×9, какие стратегии существуют и как играть в PvP-режиме Sudoku Duel.">
+<meta name="keywords" content="правила судоку, как играть в судоку, судоку для начинающих, судоку правила">
+<link rel="canonical" href="https://gorrgik.github.io/sudoku-duel/rules.html">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#38bdf8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect x='1' y='1' width='34' height='34' rx='5' fill='%231e293b' stroke='%2338bdf8' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.7; padding: 20px; max-width: 800px; margin: 0 auto; }
+a { color: #38bdf8; text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1 { font-size: 2rem; margin: 30px 0 16px; color: #38bdf8; }
+h2 { font-size: 1.4rem; margin: 28px 0 12px; color: #f1f5f9; border-left: 3px solid #38bdf8; padding-left: 12px; }
+h3 { font-size: 1.15rem; margin: 20px 0 8px; color: #cbd5e1; }
+p, li { font-size: 1rem; margin-bottom: 10px; color: #cbd5e1; }
+ul, ol { padding-left: 24px; margin-bottom: 14px; }
+li { margin-bottom: 6px; }
+.nav { background: #1e293b; padding: 14px 18px; border-radius: 10px; margin-bottom: 20px; }
+.nav a { margin-right: 14px; font-size: 0.9rem; }
+.hero { background: linear-gradient(135deg, #1e293b, #334155); padding: 28px; border-radius: 14px; margin-bottom: 24px; }
+.hero p { color: #94a3b8; font-size: 1.05rem; }
+.cta { display: inline-block; background: #38bdf8; color: #0f172a; padding: 12px 22px; border-radius: 8px; font-weight: 700; margin-top: 14px; }
+.cta:hover { background: #0ea5e9; text-decoration: none; }
+footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #334155; color: #64748b; font-size: 0.85rem; text-align: center; }
+</style>
+</head>
+<body>
+<div class="nav">
+  <a href="./">← К игре</a>
+  <a href="rules.html">Правила</a>
+  <a href="strategy.html">Стратегии</a>
+  <a href="variants.html">Разновидности</a>
+  <a href="faq.html">FAQ</a>
+</div>
+
+<h1>Правила судоку: полное руководство для начинающих и опытных игроков</h1>
+<div class="hero">
+<p>Судоку — это логическая головоломка с числами, которая появилась в Японии в 1980-х годах и завоевала весь мир. На этой странице вы узнаете все правила классического судоку 9×9, базовые и продвинутые техники, а также особенности PvP-режима в Sudoku Duel.</p>
+<a href="./" class="cta">🎮 Играть в Sudoku Duel бесплатно</a>
+</div>
+
+<h2>1. Что такое судоку</h2>
+<p>Судоку (sudoku, яп. 数独) — это головоломка с числами, целью которой является заполнение сетки 9×9 цифрами от 1 до 9. Сетка разделена на девять блоков 3×3. Каждая строка, каждый столбец и каждый блок 3×3 должны содержать все цифры от 1 до 9 без повторений.</p>
+<p>Изначально некоторые клетки уже заполнены (это называется "подсказки" или "givens"). Количество подсказок определяет сложность головоломки: чем меньше подсказок, тем сложнее судоку.</p>
+
+<h2>2. Классические правила судоку 9×9</h2>
+<p>Игровое поле состоит из 81 клетки (9 строк × 9 столбцов), которые образуют 9 блоков 3×3. Применяются три правила, и все они должны выполняться одновременно:</p>
+<ol>
+<li><strong>Правило строк:</strong> каждая из 9 строк должна содержать все цифры от 1 до 9, причём каждая цифра используется только один раз в строке.</li>
+<li><strong>Правило столбцов:</strong> каждый из 9 столбцов должен содержать все цифры от 1 до 9, причём каждая цифра используется только один раз в столбце.</li>
+<li><strong>Правило блоков 3×3:</strong> каждый из 9 выделенных блоков 3×3 должен содержать все цифры от 1 до 9 без повторений.</li>
+</ol>
+<p>В правильно составленной головоломке существует только одно решение, и оно может быть найдено чисто логически, без угадывания.</p>
+
+<h2>3. Уровни сложности</h2>
+<p>В Sudoku Duel доступны три уровня:</p>
+<ul>
+<li><strong>Лёгкий (easy)</strong> — 38 подсказок. Идеален для начинающих. Решается за 5-10 минут.</li>
+<li><strong>Средний (medium)</strong> — 30 подсказок. Требует базовых техник. Решается за 10-20 минут.</li>
+<li><strong>Сложный (hard)</strong> — 24 подсказки. Требует продвинутых стратегий. Может занять 30+ минут.</li>
+</ul>
+
+<h2>4. Правила PvP-дуэли Sudoku Duel</h2>
+<p>В режиме дуэли два игрока получают <strong>одну и ту же доску</strong> и соревнуются, кто быстрее её решит:</p>
+<ul>
+<li>У каждого игрока <strong>3 жизни</strong> — каждая ошибка отнимает одну жизнь.</li>
+<li>Потерял все жизни — проиграл (техническое поражение).</li>
+<li>Если доска заполнена правильно — победа засчитывается по количеству жизней.</li>
+<li>Победа и поражение обновляют ваш <strong>ELO-рейтинг</strong> (с коэффициентом K=30).</li>
+</ul>
+<p>Можно играть против случайного соперника через матчмейкинг или создать комнату и пригласить друга по 6-значному коду.</p>
+
+<h2>5. Инструменты игрока</h2>
+<p>В Sudoku Duel доступны:</p>
+<ul>
+<li><strong>Карандаш (pencil marks):</strong> записи в клетках для пометки возможных цифр-кандидатов.</li>
+<li><strong>Авто-режим:</strong> выбрал цифру на клавиатуре → клик в клетку. Удобно на телефоне.</li>
+<li><strong>Подсказки:</strong> в одиночном режиме доступно 1-3 подсказки в зависимости от уровня.</li>
+</ul>
+
+<h2>6. Что нельзя делать</h2>
+<ul>
+<li>Нельзя ставить одинаковые цифры в одной строке, столбце или блоке.</li>
+<li>Нельзя менять цифры в клетках-подсказках (они даны изначально).</li>
+<li>В PvP-режиме нельзя использовать подсказки.</li>
+</ul>
+
+<h2>Что дальше</h2>
+<p>Теперь когда вы знаете правила, попробуйте <a href="./">сыграть в Sudoku Duel</a> прямо сейчас. Или изучите <a href="strategy.html">стратегии решения</a>, чтобы улучшить свои результаты.</p>
+
+<footer>
+© 2026 Sudoku Duel · <a href="./">Играть онлайн</a> · <a href="faq.html">FAQ</a>
+</footer>
+</body>
+</html>

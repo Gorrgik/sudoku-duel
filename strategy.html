@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Стратегии и техники решения судоку | Sudoku Duel</title>
+<meta name="description" content="Эффективные стратегии и техники решения судоку: от простых до продвинутых. Научитесь решать судоку быстрее с помощью скрытых пар, X-Wing и других методов.">
+<meta name="keywords" content="стратегии судоку, техники решения судоку, как быстро решать судоку, скрытые пары, X-Wing">
+<link rel="canonical" href="https://gorrgik.github.io/sudoku-duel/strategy.html">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#38bdf8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect x='1' y='1' width='34' height='34' rx='5' fill='%231e293b' stroke='%2338bdf8' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.7; padding: 20px; max-width: 800px; margin: 0 auto; }
+a { color: #38bdf8; text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1 { font-size: 2rem; margin: 30px 0 16px; color: #38bdf8; }
+h2 { font-size: 1.4rem; margin: 28px 0 12px; color: #f1f5f9; border-left: 3px solid #38bdf8; padding-left: 12px; }
+h3 { font-size: 1.15rem; margin: 20px 0 8px; color: #cbd5e1; }
+p, li { font-size: 1rem; margin-bottom: 10px; color: #cbd5e1; }
+ul, ol { padding-left: 24px; margin-bottom: 14px; }
+li { margin-bottom: 6px; }
+.nav { background: #1e293b; padding: 14px 18px; border-radius: 10px; margin-bottom: 20px; }
+.nav a { margin-right: 14px; font-size: 0.9rem; }
+.hero { background: linear-gradient(135deg, #1e293b, #334155); padding: 28px; border-radius: 14px; margin-bottom: 24px; }
+.hero p { color: #94a3b8; font-size: 1.05rem; }
+.cta { display: inline-block; background: #38bdf8; color: #0f172a; padding: 12px 22px; border-radius: 8px; font-weight: 700; margin-top: 14px; }
+.cta:hover { background: #0ea5e9; text-decoration: none; }
+.tech { background: #1e293b; border-radius: 10px; padding: 18px; margin: 16px 0; border-left: 3px solid #f59e0b; }
+.tech h3 { color: #fbbf24; }
+footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #334155; color: #64748b; font-size: 0.85rem; text-align: center; }
+</style>
+</head>
+<body>
+<div class="nav">
+  <a href="./">← К игре</a>
+  <a href="rules.html">Правила</a>
+  <a href="strategy.html">Стратегии</a>
+  <a href="variants.html">Разновидности</a>
+  <a href="faq.html">FAQ</a>
+</div>
+
+<h1>Стратегии решения судоку: от простых до продвинутых</h1>
+<div class="hero">
+<p>Хотите решать судоку быстрее и реже ошибаться? Эти проверенные стратегии помогут вам улучшить результат. Начните с базовых техник и постепенно переходите к продвинутым — каждая новая стратегия открывает более сложные головоломки.</p>
+<a href="./" class="cta">🎮 Применить на практике в Sudoku Duel</a>
+</div>
+
+<h2>Уровень 1: Базовые техники</h2>
+
+<div class="tech">
+<h3>1. Скандинавский карандаш (Scanning)</h3>
+<p>Самый простой метод. Проходите каждую строку/столбец/блок и отмечайте, какие цифры уже использованы. Недостающая цифра — единственный кандидат.</p>
+<p><strong>Пример:</strong> если в строке уже есть 1, 2, 3, 4, 5, 6, 7, 8, то в оставшуюся пустую клетку можно поставить только 9.</p>
+</div>
+
+<div class="tech">
+<h3>2. Исключение по единственному кандидату (Single Candidate)</h3>
+<p>Для каждой пустой клетки определите множество возможных цифр (исключая те, что уже есть в её строке, столбце и блоке). Если осталась только одна цифра — это решение.</p>
+</div>
+
+<div class="tech">
+<h3>3. Скрытый одиночка (Hidden Single)</h3>
+<p>Более тонкая техника: в конкретном блоке 3×3 только одна клетка может содержать определённую цифру (во всех остальных клетках блока она исключена строками или столбцами). Найдите эту клетку.</p>
+</div>
+
+<h2>Уровень 2: Средние техники</h2>
+
+<div class="tech">
+<h3>4. Карандашные пометки (Pencil Marks)</h3>
+<p>Записывайте в каждой пустой клетке все возможные цифры-кандидаты. Это ключевой навык для решения средних и сложных судоку. В Sudoku Duel для этого есть режим карандаша.</p>
+</div>
+
+<div class="tech">
+<h3>5. Голые пары (Naked Pairs)</h3>
+<p>Если в блоке две клетки содержат одни и те же два кандидата (например, {3,7} и {3,7}), то 3 и 7 в этом блоке уже "использованы" — их можно удалить из кандидатов других клеток этого блока.</p>
+</div>
+
+<div class="tech">
+<h3>6. Скрытые пары (Hidden Pairs)</h3>
+<p>Если две цифры могут стоять только в двух конкретных клетках блока, то эти клетки должны содержать именно эту пару — все остальные кандидаты в них можно удалить.</p>
+</div>
+
+<div class="tech">
+<h3>7. Указатели (Pointing Pairs)</h3>
+<p>Если кандидат в блоке выстроен в линию (вся строка или столбец), то этот кандидат можно исключить из остальных клеток этой линии за пределами блока.</p>
+</div>
+
+<h2>Уровень 3: Продвинутые техники</h2>
+
+<div class="tech">
+<h3>8. X-Wing</h3>
+<p>Если цифра-кандидат образует прямоугольник из четырёх клеток (по две в двух строках и в двух столбцах), то эту цифру можно исключить из остальных клеток этих двух столбцов.</p>
+</div>
+
+<div class="tech">
+<h3>9. Меч-рыба (Swordfish)</h3>
+<p>Расширение X-Wing на три строки и три столбца. Редко используется, но полезно на сложных уровнях.</p>
+</div>
+
+<div class="tech">
+<h3>10. Цепочки (Forcing Chains)</h3>
+<p>Если вы предположите, что цифра X в клетке A, то через цепочку логических выводов получается противоречие — значит в A должна стоять другая цифра.</p>
+</div>
+
+<h2>Практические советы для PvP-дуэлей</h2>
+<ul>
+<li><strong>Не паникуйте.</strong> Одна ошибка — не конец. У вас 3 жизни.</li>
+<li><strong>Считайте кандидатов в уме.</strong> Карандашные пометки замедляют — для скорости тренируйтесь без них.</li>
+<li><strong>Используйте скрытых одиночек.</strong> Это самая быстрая техника для средних уровней.</li>
+<li><strong>Ищите пары в строках.</strong> Если в строке осталось 2 клетки для двух цифр — это быстрая пара.</li>
+<li><strong>Блоки решайте первыми.</strong> Если в блоке всего 2-3 пустые клетки — заполните их сразу.</li>
+</ul>
+
+<h2>С чего начать?</h2>
+<p>Если вы новичок — начните с уровня "Лёгкий" и техник 1-3. Через неделю переходите на средний и добавляйте карандашные пометки. Через месяц — пробуйте продвинутые техники на сложном уровне.</p>
+<p>Лучший способ научиться — <a href="./">играть в Sudoku Duel</a> каждый день по 10-15 минут.</p>
+
+<footer>
+© 2026 Sudoku Duel · <a href="./">Играть онлайн</a> · <a href="rules.html">Правила</a>
+</footer>
+</body>
+</html>
