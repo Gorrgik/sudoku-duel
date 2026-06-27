@@ -1,8 +1,10 @@
 name: Send email code
 on:
-  schedule:
-    - cron: '*/1 * * * *'   # каждую минуту
+  repository_dispatch:
+    types: [send-email]
   workflow_dispatch:
+  schedule:
+    - cron: '*/1 * * * *'
 jobs:
   send:
     runs-on: ubuntu-latest
