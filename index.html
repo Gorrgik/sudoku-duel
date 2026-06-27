@@ -2819,10 +2819,29 @@ function updateNumRemaining(n, btn) {
 
 function placeNumber(n) {
   if (!state || !state.started) return;
+  // Защита: убедимся что state.user и state.solution — массивы 9x9
+  if (!state.user || !Array.isArray(state.user) || state.user.length !== 9 ||
+      !state.solution || !Array.isArray(state.solution) || state.solution.length !== 9 ||
+      !state.puzzle || !Array.isArray(state.puzzle) || state.puzzle.length !== 9) {
+    console.warn('[SUDOKU] placeNumber: state битый', state);
+    return;
+  }
+  if (!state.notes || !Array.isArray(state.notes) || state.notes.length !== 9) {
+    state.notes = Array.from({length: 9}, () => Array.from({length: 9}, () => []));
+  }
+  if (!state.errors || !Array.isArray(state.errors) || state.errors.length !== 9) {
+    state.errors = Array.from({length: 9}, () => Array(9).fill(false));
+  }
 
   // НЕ стираем подсветку здесь — пусть остаётся видимой
   if (!selectedCell) return;
   const { r, c } = selectedCell;
+
+  // Защита: строки должны существовать
+  if (!state.puzzle[r] || !state.user[r] || !state.solution[r] || !state.notes[r] || !state.errors[r]) {
+    console.warn('[SUDOKU] placeNumber: битая строка', r);
+    return;
+  }
 
   // Заблокировано, если это начальная подсказка
   if (state.puzzle[r][c] !== 0) return;
