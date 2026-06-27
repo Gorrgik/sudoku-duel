@@ -1,7 +1,7 @@
 // Service Worker для Sudoku Duel
 // Стратегия: Network First для HTML, Cache Fallback для статики
 
-const CACHE_NAME = 'sudoku-duel-v1';
+const CACHE_NAME = 'sudoku-duel-v2';
 const PRECACHE_URLS = [
   './',
   './index.html',

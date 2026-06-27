@@ -2560,6 +2560,12 @@ function showGameScreen() {
 }
 
 function renderBoard() {
+  // Защита: если state не инициализирован — рендерим пустую доску вместо краша
+  if (!state || !state.puzzle || !Array.isArray(state.puzzle) || !state.puzzle[0]) {
+    const board = $('board');
+    if (board) board.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-dim);">Доска не загружена</div>';
+    return;
+  }
   const board = $('board');
   board.innerHTML = '';
   clearDigitHighlight();
