@@ -6,7 +6,56 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Судоку</title>
+<title>Sudoku Duel — играть в судоку онлайн с другом бесплатно, PvP 1 на 1</title>
+<meta name="description" content="Sudoku Duel — бесплатная PvP-судоку онлайн. Сразись с другими игроками на одной доске в реальном времени. 3 жизни, ELO-рейтинг, без рекламы и регистрации. Играй прямо в браузере или в Telegram.">
+<meta name="keywords" content="судоку онлайн, играть в судоку, судоку с другом, судоку на двоих, судоку 1 на 1, судоку дуэль, судоку PvP, sudoku online, sudoku duel, multiplayer sudoku, логические игры онлайн">
+<meta name="author" content="Sudoku Duel">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://gorrgik.github.io/sudoku-duel/">
+
+<!-- Open Graph (для красивого шеринга в VK, Telegram, Facebook) -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Sudoku Duel — PvP-судоку онлайн с рейтингом">
+<meta property="og:description" content="Играй в судоку против реальных соперников на одной доске. 3 жизни, ELO-рейтинг, без рекламы. Бесплатно, без регистрации.">
+<meta property="og:url" content="https://gorrgik.github.io/sudoku-duel/">
+<meta property="og:site_name" content="Sudoku Duel">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:image" content="https://gorrgik.github.io/sudoku-duel/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Sudoku Duel — PvP-судоку онлайн">
+<meta name="twitter:description" content="Бесплатная PvP-судоку с ELO-рейтингом. Играй против реальных соперников в реальном времени.">
+<meta name="twitter:image" content="https://gorrgik.github.io/sudoku-duel/og-image.png">
+
+<!-- Schema.org (Google Rich Results) -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "VideoGame",
+  "name": "Sudoku Duel",
+  "description": "Бесплатная онлайн-игра судоку на двоих в реальном времени. Сразись с другими игроками на одной доске, набери ELO-рейтинг.",
+  "url": "https://gorrgik.github.io/sudoku-duel/",
+  "image": "https://gorrgik.github.io/sudoku-duel/og-image.png",
+  "genre": ["Puzzle", "Logic", "Multiplayer"],
+  "gamePlatform": ["Web Browser", "Telegram"],
+  "applicationCategory": "GameApplication",
+  "operatingSystem": "Any",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "RUB"
+  },
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": "5",
+    "ratingCount": "1"
+  }
+}
+</script>
+
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect x='1' y='1' width='34' height='34' rx='5' fill='%231e293b' stroke='%2338bdf8' stroke-width='2'/%3E%3Cg stroke='%2364748b' stroke-width='0.5' opacity='0.7'%3E%3Cline x1='9' y1='2' x2='9' y2='34'/%3E%3Cline x1='17' y1='2' x2='17' y2='34'/%3E%3Cline x1='25' y1='2' x2='25' y2='34'/%3E%3Cline x1='2' y1='9' x2='34' y2='9'/%3E%3Cline x1='2' y1='17' x2='34' y2='17'/%3E%3Cline x1='2' y1='25' x2='34' y2='25'/%3E%3C/g%3E%3Cg stroke='%23cbd5e1' stroke-width='1.5'%3E%3Cline x1='13' y1='1' x2='13' y2='35'/%3E%3Cline x1='23' y1='1' x2='23' y2='35'/%3E%3Cline x1='1' y1='13' x2='35' y2='13'/%3E%3Cline x1='1' y1='23' x2='35' y2='23'/%3E%3C/g%3E%3Cg font-family='monospace' font-weight='bold' text-anchor='middle' font-size='7'%3E%3Ctext x='7' y='10' fill='%23cbd5e1'%3E5%3C/text%3E%3Ctext x='15' y='10' fill='%2338bdf8'%3E9%3C/text%3E%3Ctext x='23' y='10' fill='%23cbd5e1'%3E3%3C/text%3E%3Ctext x='7' y='18' fill='%2364748b'%3E7%3C/text%3E%3Ctext x='15' y='18' fill='%23cbd5e1'%3E2%3C/text%3E%3Ctext x='23' y='18' fill='%2322c55e'%3E1%3C/text%3E%3Ctext x='7' y='26' fill='%23cbd5e1'%3E4%3C/text%3E%3Ctext x='15' y='26' fill='%2364748b'%3E8%3C/text%3E%3Ctext x='23' y='26' fill='%23f59e0b'%3E6%3C/text%3E%3C/g%3E%3C/svg%3E">
 <meta name="theme-color" content="#38bdf8">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -6146,5 +6195,43 @@ document.addEventListener('keydown', e => {
 });
 
 </script>
+
+<!-- SEO: видимый контент для Google/Яндекс (вне экрана, но индексируется) -->
+<main id="seo-content" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;" aria-hidden="true">
+<h1>Sudoku Duel — играть в судоку онлайн с другом бесплатно</h1>
+<h2>Что такое Sudoku Duel?</h2>
+<p>Sudoku Duel — это бесплатная онлайн-игра в судоку на двоих в реальном времени. Два игрока получают одинаковую доску 9×9 и наперегонки заполняют её цифрами от 1 до 9. Каждый неправильный ход отнимает одну жизнь — у тебя их всего три. Кто первый заполнит всю доску (или у кого останутся жизни) — побеждает.</p>
+
+<h2>Как играть в судоку дуэль?</h2>
+<p>Правила просты: каждая строка, столбец и блок 3×3 должны содержать цифры от 1 до 9 без повторений. В дуэли оба соперника решают одну и ту же головоломку, но независимо друг от друга. Кто быстрее и точнее — тот побеждает и получает очки ELO-рейтинга.</p>
+
+<h2>Особенности Sudoku Duel</h2>
+<ul>
+<li>Реальный PvP-судоку онлайн — играй против живых соперников, а не против компьютера</li>
+<li>ELO-рейтинг с коэффициентом K=30 — каждая победа и поражение учитываются</li>
+<li>Три уровня сложности: лёгкий (38 подсказок), средний (30), сложный (24)</li>
+<li>Режим карандаша для заметок в клетках</li>
+<li>Авто-режим для быстрой постановки цифр</li>
+<li>Матчмейкинг за 10 секунд когда оба игрока онлайн</li>
+<li>Игра прямо в браузере — без скачивания, без установки</li>
+<li>Telegram Mini App — можно играть прямо в мессенджере</li>
+<li>Бесплатно, без рекламы, без скрытых платежей</li>
+<li>Без регистрации — зашёл и играешь</li>
+</ul>
+
+<h2>Как начать играть?</h2>
+<p>1. Открой сайт <a href="/">gorrgik.github.io/sudoku-duel</a> или нажми кнопку «Начать дуэль» в главном меню.<br>
+2. Нажми «Найти случайного соперника» — система найдёт тебе противника за несколько секунд.<br>
+3. Или создай свою комнату и пригласи друга по коду.<br>
+4. Заполняй доску быстрее соперника и получай ELO-очки.</p>
+
+<h2>Часто задаваемые вопросы</h2>
+<p><strong>Нужна ли регистрация?</strong> Нет, можно играть анонимно. Для сохранения рейтинга и истории войди через Google или email.</p>
+<p><strong>Это бесплатно?</strong> Да, полностью бесплатно. Без рекламы внутри игры.</p>
+<p><strong>Можно играть с другом?</strong> Да, создай комнату и пригласи друга по 6-значному коду.</p>
+<p><strong>Как считается рейтинг?</strong> Используется классическая формула ELO с коэффициентом K=30. Победа над сильным соперником даёт больше очков.</p>
+<p><strong>Что такое 3 жизни?</strong> У каждого игрока 3 жизни. За каждую ошибку теряешь одну. Потерял все — проиграл.</p>
+
+</main>
 </body>
 </html>
