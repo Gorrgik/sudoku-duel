@@ -1543,7 +1543,7 @@
   </div>
   <h2 style="margin-top:24px;">Начать игру</h2>
   <div class="level-grid">
-    <button class="level-btn easy" data-level="easy">
+    <button class="level-btn easy" id="startGameBtn">
       <div>
         <div class="lvl-title">▶ Начать игру</div>
         <div class="lvl-desc">Выбрать сложность при клике</div>
@@ -3091,7 +3091,7 @@ function hideModal() {
 
 /* ============== EVENTS ============== */
 
-// Кнопка «Начать игру» — показывает выбор сложности
+// Кнопки сложности (только в модалке) — имеют data-level
 document.querySelectorAll('.level-btn[data-level]').forEach(btn => {
   btn.addEventListener('click', () => {
     const lvl = btn.dataset.level;
@@ -3100,13 +3100,10 @@ document.querySelectorAll('.level-btn[data-level]').forEach(btn => {
   });
 });
 
-// Кнопка «Начать игру» (без data-level) — открывает выбор сложности
-const startGameBtn = document.querySelector('.level-btn:not([data-level]):not(#showDuelBtn)');
-if (startGameBtn) {
-  startGameBtn.addEventListener('click', () => {
-    showChooseDifficultyModal();
-  });
-}
+// Кнопка «Начать игру» (на главной) — открывает выбор сложности
+$('startGameBtn')?.addEventListener('click', () => {
+  showChooseDifficultyModal();
+});
 
 // Показ модалки выбора сложности
 function showChooseDifficultyModal() {
