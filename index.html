@@ -915,30 +915,18 @@
 
     // ===== Daily Challenge =====
     async getDailyChallenge() {
-      if (!sbOk) return null;
-      // Используем МСК (UTC+3) — все игроки получают одну и ту же дату
+      // Все игроки получают одну и ту же доску — генерируем детерминированно по seed = дата МСК
+      // Хранить puzzle в БД не нужно: seed даёт ту же доску у всех
       const now = new Date();
       const msk = new Date(now.getTime() + 3 * 60 * 60 * 1000);
       const yyyymmdd = msk.getUTCFullYear() * 10000 + (msk.getUTCMonth() + 1) * 100 + msk.getUTCDate();
       const dateStr = `${msk.getUTCFullYear()}-${String(msk.getUTCMonth() + 1).padStart(2, '0')}-${String(msk.getUTCDate()).padStart(2, '0')}`;
       try {
-        const existing = await sbGet('daily_challenges', `date=eq.${dateStr}&limit=1`);
-        if (existing && existing[0]) {
-          // На случай если Supabase вернул jsonb как строку — парсим
-          let puz = existing[0].puzzle;
-          let sol = existing[0].solution;
-          if (typeof puz === 'string') { try { puz = JSON.parse(puz); } catch (_) {} }
-          if (typeof sol === 'string') { try { sol = JSON.parse(sol); } catch (_) {} }
-          return { ...existing[0], puzzle: puz, solution: sol };
-        }
-        // Генерируем через существующую функцию
         const gen = (typeof generateSeededPuzzle === 'function')
           ? generateSeededPuzzle(String(yyyymmdd), 38)
           : (typeof generatePuzzle === 'function' ? generatePuzzle(38) : null);
         if (!gen) return null;
-        const row = { date: dateStr, seed: yyyymmdd, puzzle: gen.puzzle, solution: gen.solution };
-        try { await sbPost('daily_challenges', row); } catch (e) { /* race ok */ }
-        return row;
+        return { date: dateStr, seed: yyyymmdd, puzzle: gen.puzzle, solution: gen.solution };
       } catch (e) { return null; }
     },
 
@@ -6486,6 +6474,7 @@ async function showDailyChallengeModal() {
 
 function startDailyGame(challenge) {
   if (!challenge || !challenge.puzzle || !challenge.solution) {
+    console.error('[SUDOKU] startDailyGame: bad challenge', challenge);
     alert('Не удалось загрузить задание. Попробуй ещё раз.');
     return;
   }
@@ -6498,9 +6487,21 @@ function startDailyGame(challenge) {
   $('levelScreen').classList.add('hidden');
   $('gameScreen').classList.remove('hidden');
   // Используем существующую логику одиночной игры с заданной доской
-  puzzle = parseBoard(challenge.puzzle);
-  solution = parseBoard(challenge.solution);
-  if (!puzzle || !solution) {
+  try {
+    puzzle = parseBoard(challenge.puzzle);
+    solution = parseBoard(challenge.solution);
+  } catch (e) {
+    console.error('[SUDOKU] parseBoard failed:', e);
+    alert('Ошибка разбора доски. Попробуй ещё раз.');
+    return;
+  }
+  if (!puzzle || !Array.isArray(puzzle) || puzzle.length !== 9 || !puzzle[0] || puzzle[0].length !== 9) {
+    console.error('[SUDOKU] puzzle invalid:', puzzle);
+    alert('Ошибка данных задания. Попробуй ещё раз.');
+    return;
+  }
+  if (!solution || !Array.isArray(solution) || solution.length !== 9) {
+    console.error('[SUDOKU] solution invalid:', solution);
     alert('Ошибка данных задания. Попробуй ещё раз.');
     return;
   }
