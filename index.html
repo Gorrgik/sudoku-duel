@@ -25,6 +25,7 @@
 <meta property="og:url" content="https://gorrgik.github.io/sudoku-duel/">
 <meta property="og:site_name" content="Sudoku Duel">
 <meta property="og:locale" content="ru_RU">
+<meta property="og:image" content="https://gorrgik.github.io/sudoku-duel/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 
@@ -32,7 +33,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Sudoku Duel — PvP-судоку онлайн">
 <meta name="twitter:description" content="Бесплатная PvP-судоку с ELO-рейтингом. Играй против реальных соперников в реальном времени.">
-<meta name="twitter:image" content="">
+<meta name="twitter:image" content="https://gorrgik.github.io/sudoku-duel/og-image.png">
 
 <!-- Schema.org (Google Rich Results) -->
 <script type="application/ld+json">
@@ -42,7 +43,7 @@
   "name": "Sudoku Duel",
   "description": "Бесплатная онлайн-игра судоку на двоих в реальном времени. Сразись с другими игроками на одной доске, набери ELO-рейтинг.",
   "url": "https://gorrgik.github.io/sudoku-duel/",
-  "image": "https://gorrgik.github.io/sudoku-duel/",
+  "image": "https://gorrgik.github.io/sudoku-duel/og-image.png",
   "genre": ["Puzzle", "Logic", "Multiplayer"],
   "gamePlatform": ["Web Browser", "Telegram"],
   "applicationCategory": "GameApplication",
@@ -1015,11 +1016,20 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  /* Стилизованный scrollbar для всех модальных окон и контейнеров */
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--accent-2); }
+  /* Стилизованный scrollbar — закруглённый, со скрытыми стрелками, с градиентом */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+  ::-webkit-scrollbar-corner { background: transparent; }
   * { scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }
 
   :root {
@@ -2060,6 +2070,22 @@ function generateSeededPuzzle(seed, clues) {
     puzzle[r][c] = 0;
     removed++;
   }
+  // Гарантируем уникальное решение: добавляем подсказки если многовариантно
+  if (typeof countSudokuSolutions === 'function') {
+    let sols = countSudokuSolutions(puzzle, 2);
+    let safetyAdds = 0;
+    while (sols > 1 && safetyAdds < 8) {
+      const empties = [];
+      for (let r = 0; r < 9; r++)
+        for (let c = 0; c < 9; c++)
+          if (puzzle[r][c] === 0) empties.push({r, c});
+      if (!empties.length) break;
+      const pick = empties[Math.floor(Math.random() * empties.length)];
+      puzzle[pick.r][pick.c] = solution[pick.r][pick.c];
+      safetyAdds++;
+      sols = countSudokuSolutions(puzzle, 2);
+    }
+  }
   return { puzzle, solution };
 }
 
@@ -2144,7 +2170,62 @@ function generatePuzzle(clues) {
 
   // Пост-балансировка по блокам, строкам и столбцам
   postBalance(bestPuzzle.puzzle, bestPuzzle.solution, blockTarget);
+
+  // Проверяем уникальность решения — если несколько, добавляем подсказки
+  let solutions = countSudokuSolutions(bestPuzzle.puzzle, 2);
+  let safetyAdds = 0;
+  while (solutions > 1 && safetyAdds < 8) {
+    // Добавляем подсказку в случайную пустую клетку
+    const empties = [];
+    for (let r = 0; r < 9; r++)
+      for (let c = 0; c < 9; c++)
+        if (bestPuzzle.puzzle[r][c] === 0) empties.push({r, c});
+    if (!empties.length) break;
+    const pick = empties[Math.floor(Math.random() * empties.length)];
+    bestPuzzle.puzzle[pick.r][pick.c] = bestPuzzle.solution[pick.r][pick.c];
+    safetyAdds++;
+    solutions = countSudokuSolutions(bestPuzzle.puzzle, 2);
+  }
   return bestPuzzle;
+}
+
+// Backtracking solver — считает количество решений (с лимитом)
+function countSudokuSolutions(board, limit) {
+  const b = board.map(row => row.slice());
+  let count = 0;
+  function solve() {
+    if (count >= limit) return; // уже достаточно — выходим
+    let minR = -1, minC = -1, minOpts = 10;
+    // Находим клетку с минимумом возможных цифр (MRV heuristic)
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if (b[r][c] !== 0) continue;
+        const used = new Set();
+        for (let i = 0; i < 9; i++) { used.add(b[r][i]); used.add(b[i][c]); }
+        const br = Math.floor(r/3)*3, bc = Math.floor(c/3)*3;
+        for (let dr = 0; dr < 3; dr++) for (let dc = 0; dc < 3; dc++) used.add(b[br+dr][bc+dc]);
+        const opts = [];
+        for (let n = 1; n <= 9; n++) if (!used.has(n)) opts.push(n);
+        if (opts.length < minOpts) { minOpts = opts.length; minR = r; minC = c; if (opts.length === 1) break; }
+      }
+      if (minOpts === 1) break;
+    }
+    if (minR === -1) { count++; return; } // доска заполнена — нашли решение
+    const used = new Set();
+    for (let i = 0; i < 9; i++) { used.add(b[minR][i]); used.add(b[i][minC]); }
+    const br = Math.floor(minR/3)*3, bc = Math.floor(minC/3)*3;
+    for (let dr = 0; dr < 3; dr++) for (let dc = 0; dc < 3; dc++) used.add(b[br+dr][bc+dc]);
+    for (let n = 1; n <= 9; n++) {
+      if (!used.has(n)) {
+        b[minR][minC] = n;
+        solve();
+        b[minR][minC] = 0;
+        if (count >= limit) return;
+      }
+    }
+  }
+  solve();
+  return count;
 }
 window._duelGeneratePuzzle = generatePuzzle;
 
@@ -2870,6 +2951,32 @@ function placeNumber(n) {
   // Очистка кандидатов если ставим финальную цифру
   if (n >= 1 && n <= 9) {
     state.notes[r][c] = [];
+    // Автоудаление этой цифры из карандашных пометок в строке/столбце/блоке 3x3
+    for (let i = 0; i < 9; i++) {
+      // Строка
+      if (state.notes[r] && state.notes[r][i]) {
+        const idx = state.notes[r][i].indexOf(n);
+        if (idx >= 0) state.notes[r][i].splice(idx, 1);
+      }
+      // Столбец
+      if (state.notes[i] && state.notes[i][c]) {
+        const idx = state.notes[i][c].indexOf(n);
+        if (idx >= 0) state.notes[i][c].splice(idx, 1);
+      }
+    }
+    // Блок 3x3
+    const br = Math.floor(r / 3) * 3;
+    const bc = Math.floor(c / 3) * 3;
+    for (let dr = 0; dr < 3; dr++) {
+      for (let dc = 0; dc < 3; dc++) {
+        const rr = br + dr, cc = bc + dc;
+        if (rr === r && cc === c) continue;
+        if (state.notes[rr] && state.notes[rr][cc]) {
+          const idx = state.notes[rr][cc].indexOf(n);
+          if (idx >= 0) state.notes[rr][cc].splice(idx, 1);
+        }
+      }
+    }
   }
 
   // Заблокировано, если клетка уже правильно заполнена —
