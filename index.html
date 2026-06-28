@@ -1016,23 +1016,21 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  /* Стилизованный scrollbar — закруглённый, со скрытыми стрелками, с градиентом */
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-track { background: transparent; border-radius: 4px; }
-  ::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, #38bdf8, #818cf8) !important;
-    border-radius: 4px !important;
-    border: 1px solid transparent !important;
-    background-clip: padding-box !important;
-    min-height: 30px;
+  /* Кастомный scrollbar — через CSS полностью отключаем нативный */
+  ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-thumb,
+  ::-webkit-scrollbar-button,
+  ::-webkit-scrollbar-corner { display: none !important; }
+  * { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+  /* Для модалок с длинным контентом — оборачиваем в кастомный scrollbar */
+  .custom-scroll {
+    overflow-y: auto !important;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
-  ::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, #818cf8, #38bdf8) !important;
-  }
-  ::-webkit-scrollbar-button { display: none !important; width: 0 !important; height: 0 !important; }
-  ::-webkit-scrollbar-button:start:decrement, ::-webkit-scrollbar-button:end:increment { display: none !important; }
-  ::-webkit-scrollbar-corner { background: transparent !important; }
-  * { scrollbar-width: thin; scrollbar-color: #38bdf8 transparent !important; }
+  .custom-scroll::-webkit-scrollbar { display: none; }
 
   :root {
     /* Общие */
@@ -2639,6 +2637,57 @@ function loadRecords() {
 
 const $ = id => document.getElementById(id);
 
+// === Кастомный scrollbar ===
+// Создаёт рядом с элементом overlay с тонкой цветной полоской прокрутки
+function attachCustomScrollbar(el) {
+  if (!el || el.dataset.customScroll) return;
+  el.dataset.customScroll = '1';
+  el.classList.add('custom-scroll');
+  el.style.position = el.style.position || 'relative';
+
+  const track = document.createElement('div');
+  track.className = 'custom-scroll-track';
+  track.style.cssText = 'position:absolute;top:0;right:2px;width:6px;height:100%;background:transparent;pointer-events:none;border-radius:3px;';
+  const thumb = document.createElement('div');
+  thumb.className = 'custom-scroll-thumb';
+  thumb.style.cssText = 'position:absolute;top:0;right:0;width:6px;height:30px;background:linear-gradient(180deg,#38bdf8,#818cf8);border-radius:3px;transition:opacity .2s;opacity:0;';
+  track.appendChild(thumb);
+  el.appendChild(track);
+
+  function update() {
+    const sh = el.scrollHeight;
+    const ch = el.clientHeight;
+    if (sh <= ch) { thumb.style.opacity = '0'; return; }
+    const ratio = ch / sh;
+    const top = (el.scrollTop / (sh - ch)) * (ch - Math.max(30, ch * ratio));
+    thumb.style.height = Math.max(30, ch * ratio) + 'px';
+    thumb.style.top = top + 'px';
+    thumb.style.opacity = '1';
+  }
+  el.addEventListener('scroll', update);
+  // Обновляем при изменениях контента
+  new ResizeObserver(update).observe(el);
+  // Навешиваем pointer events на трек
+  track.style.pointerEvents = 'auto';
+  let dragging = false;
+  let startY = 0, startScroll = 0;
+  track.addEventListener('mousedown', e => {
+    dragging = true;
+    startY = e.clientY;
+    startScroll = el.scrollTop;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const sh = el.scrollHeight, ch = el.clientHeight;
+    const dy = e.clientY - startY;
+    const ratio = (sh - ch) / Math.max(1, ch - parseFloat(thumb.style.height) || 30);
+    el.scrollTop = startScroll + dy * ratio;
+  });
+  document.addEventListener('mouseup', () => { dragging = false; });
+  update();
+}
+
 function showLevelScreen() {
   stopTimer();
   forceHideModal();
@@ -3507,6 +3556,15 @@ function showModal() {
   m.style.cssText = '';
   m.style.zIndex = '1000';
   m.style.display = 'flex';
+  // Подключаем кастомный scrollbar ко всем scrollable элементам внутри
+  setTimeout(() => {
+    const content = $('modalContent');
+    if (content) {
+      content.querySelectorAll('[style*="overflow-y:auto"], [style*="overflow: auto"], .custom-scroll').forEach(el => {
+        attachCustomScrollbar(el);
+      });
+    }
+  }, 50);
 }
 function hideModal() {
   const m = $('modal');
@@ -5197,7 +5255,11 @@ async function showAdminUsers() {
 function showSettingsModal() {
   const modal = $('modalContent');
   const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-  const vibSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
+  const vibSupported = (typeof navigator !== 'undefined') && (typeof navigator.vibrate === 'function') && (
+    ('ontouchstart' in window) ||
+    (navigator.maxTouchPoints > 0) ||
+    (navigator.msMaxTouchPoints > 0)
+  );
   modal.innerHTML = `
     <h2>🛠 Настройки</h2>
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
@@ -5532,7 +5594,12 @@ setTimeout(updateAuthButton, 1500);
 setTimeout(updateAuthButton, 3000);
 
 $('resumeBtn').addEventListener('click', resumeGame);
-$('dailyChallengeBtn').addEventListener('click', showDailyChallengeModal);
+$('dailyChallengeBtn').addEventListener('click', () => {
+  // При входе в Daily Challenge очищаем любое сохранённое продолжение обычной игры
+  try { localStorage.removeItem('sudoku_state_v3'); } catch (e) {}
+  state = null;
+  showDailyChallengeModal();
+});
 $('showAchievementsBtn').addEventListener('click', showAchievementsModal);
 $('showRecordsBtn').addEventListener('click', showRecordsModal);
 $('showDuelBtn').addEventListener('click', () => {
