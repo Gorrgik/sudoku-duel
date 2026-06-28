@@ -1015,6 +1015,13 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* Стилизованный scrollbar для всех модальных окон и контейнеров */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent-2); }
+  * { scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }
+
   :root {
     /* Общие */
     --bg: #0f172a;
@@ -5366,7 +5373,7 @@ $('showDuelBtn').addEventListener('click', () => {
   showDuelMenu();
 });
 $('showDuelRatingsBtn').addEventListener('click', async () => {
-  if (!window.FB.isSignedIn()) { alert('Подождите...'); return; }
+  // Рейтинг можно смотреть без входа — данные публичные
   await showDuelRatingsModal();
 });
 $('showFeedbackBtn')?.addEventListener('click', () => showFeedbackModal());
